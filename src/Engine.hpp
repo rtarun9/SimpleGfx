@@ -8,8 +8,8 @@ public:
 	Engine(const std::string_view windowTitle);
 
 	void loadContent() override;
-	void render() override;
 	void update() override;
+	void render() override;
 
 private:
 };
