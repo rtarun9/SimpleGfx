@@ -1,32 +1,6 @@
 #pragma once
 
-#include <string_view>
-
-#include <d3d11.h>
-#include <dxgi1_3.h>
-#include <wrl.h>
-
-#include <source_location>
-#include <format>
-
 struct SDL_Window;
-
-inline void fatalError(const std::string_view message, const std::source_location sourceLocation = std::source_location::current())
-{
-	const std::string errorMessage =
-		std::string(message.data() +
-			std::format(" Source Location data : File Name -> {}, Function Name -> {}, Line Number -> {}, Column -> {}", sourceLocation.file_name(), sourceLocation.function_name(), sourceLocation.line(), sourceLocation.column()));
-
-	throw std::runtime_error(errorMessage.data());
-}
-
-inline void throwIfFailed(const HRESULT hr, const std::source_location sourceLocation = std::source_location::current())
-{
-	if (FAILED(hr))
-	{
-		fatalError("HRESULT failed!", sourceLocation);
-	}
-}
 
 namespace sgfx
 {
@@ -52,6 +26,18 @@ namespace sgfx
 		virtual void update() = 0;
 		virtual void render() = 0;
 
+		void bindPipeline(const GraphicsPipeline& pipeline);
+
+		[[nodiscard]] Microsoft::WRL::ComPtr<ID3D11VertexShader> createVertexShader(const std::wstring_view shaderPath, Microsoft::WRL::ComPtr<ID3DBlob>& outShaderBlob);
+		[[nodiscard]] Microsoft::WRL::ComPtr<ID3D11PixelShader> createPixelShader(const std::wstring_view shaderPath);
+
+		[[nodiscard]] Microsoft::WRL::ComPtr<ID3D11InputLayout> createInputLayout(ID3DBlob* vertexShaderBlob, std::span<const InputLayoutElementDesc> inputLayoutElementDescs);
+
+		[[nodiscard]] GraphicsPipeline createGraphicsPipeline(const GraphicsPipelineCreationDesc& pipelineCreationDesc);
+
+		template <typename T>
+		[[nodiscard]] Microsoft::WRL::ComPtr<ID3D11Buffer> createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data = {});
+	
 	private:
 		void createDeviceResources();
 		void createSwapchainResources();
@@ -70,10 +56,39 @@ namespace sgfx
 
 		comptr<ID3D11Device> m_device{};
 		comptr<ID3D11DeviceContext> m_deviceContext{};
-		comptr<IDXGIFactory3> m_factory{};
+		comptr<IDXGIFactory6> m_factory{};
 		comptr<IDXGISwapChain1> m_swapchain{};
 		comptr<ID3D11RenderTargetView> m_renderTargetView{};
 	
 		D3D11_VIEWPORT m_viewport{};
 	};
+
+	template<typename T>
+	inline Microsoft::WRL::ComPtr<ID3D11Buffer> Application::createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data)
+	{
+		comptr<ID3D11Buffer> buffer{};
+
+		const D3D11_BUFFER_DESC bufferDesc = 
+		{
+			.ByteWidth = static_cast<uint32_t>(data.size_bytes()),
+			.Usage = bufferCreationDesc.usage,
+			.BindFlags = bufferCreationDesc.bindFlags,
+		};
+
+		if (data.size() != 0)
+		{
+			const D3D11_SUBRESOURCE_DATA resourceData =
+			{
+				.pSysMem = data.data()
+			};
+
+			throwIfFailed(m_device->CreateBuffer(&bufferDesc, &resourceData, &buffer));
+		}
+		else
+		{
+			// Some stuff here ? 
+		}
+
+		return buffer;
+	}
 }

@@ -1,16 +1,9 @@
+#include "Pch.hpp"
+
 #include "Application.hpp"
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_syswm.h>
-
-#include <iostream>
-#include <exception>
-
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "dxgi.lib")
-#pragma comment(lib, "d3dcompiler.lib")
-#pragma comment(lib, "winmm.lib")
-#pragma comment(lib, "dxguid.lib")
+#include <SDL.h>
+#include <SDL_syswm.h>
 
 namespace sgfx
 {
@@ -124,8 +117,33 @@ namespace sgfx
 
 		throwIfFailed(::CreateDXGIFactory2(factoryCreationFlags, IID_PPV_ARGS(&m_factory)));
 
+		// Get the adapter with best performance.
+		comptr<IDXGIAdapter1> adapter{};
+		throwIfFailed(m_factory->EnumAdapterByGpuPreference(0u, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter)));
+
+		uint32_t deviceCreationFlags = 0u;
+
+		if constexpr (SGFX_DEBUG)
+		{
+			deviceCreationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+
+			// Display chosen adapter.
+			DXGI_ADAPTER_DESC1 adapterDesc{};
+			throwIfFailed(adapter->GetDesc1(&adapterDesc));
+
+			std::cout << "Chosen Adapter : ";
+			std::wcout << adapterDesc.Description << L'\n';
+		}
+
 		// Create the D3D11 device and device context.
-		throwIfFailed(::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0u, nullptr, 0u, D3D11_SDK_VERSION, &m_device, nullptr, &m_deviceContext));
+		throwIfFailed(::D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, deviceCreationFlags, nullptr, 0u, D3D11_SDK_VERSION, &m_device, nullptr, &m_deviceContext));
+	
+		if constexpr (SGFX_DEBUG)
+		{
+			// Enable debug layer.
+			comptr<ID3D11Debug> debug{};
+			throwIfFailed(m_device.As(&debug));
+		}
 	}
 
 	void Application::createSwapchainResources()
@@ -161,6 +179,96 @@ namespace sgfx
 			.MinDepth = 0.0f,
 			.MaxDepth = 1.0f
 		};
+	}
+
+	Microsoft::WRL::ComPtr<ID3D11VertexShader> Application::createVertexShader(const std::wstring_view shaderPath, comptr<ID3DBlob>& outShaderBlob)
+	{
+		comptr <ID3D11VertexShader> vertexShader{};
+
+		comptr<ID3DBlob> errorBlob{};
+
+		if (FAILED(::D3DCompileFromFile(shaderPath.data(), nullptr, nullptr, "VsMain", "vs_5_0", 0u, 0u, &outShaderBlob, &errorBlob)))
+		{
+			std::wcout << "Error in compiling shader : " << shaderPath << ". Error : " << static_cast<const char*>(errorBlob->GetBufferPointer());
+			throw std::runtime_error("Shader compilation error.");
+		}
+
+		throwIfFailed(m_device->CreateVertexShader(outShaderBlob->GetBufferPointer(), outShaderBlob->GetBufferSize(), nullptr, &vertexShader));
+
+		return vertexShader;
+	}
+
+
+	void Application::bindPipeline(const GraphicsPipeline& pipeline)
+	{
+		m_deviceContext->IASetPrimitiveTopology(pipeline.primitiveTopology);
+		m_deviceContext->IASetInputLayout(pipeline.inputLayout.Get());
+
+		m_deviceContext->VSSetShader(pipeline.vertexShader.Get(), nullptr, 0u);
+		m_deviceContext->PSSetShader(pipeline.pixelShader.Get(), nullptr, 0u);
+	}
+
+	Microsoft::WRL::ComPtr<ID3D11PixelShader> Application::createPixelShader(const std::wstring_view shaderPath)
+	{
+		comptr <ID3D11PixelShader> pixelShader{};
+
+		comptr<ID3DBlob> shaderBlob{};
+		comptr<ID3DBlob> errorBlob{};
+
+		if (FAILED(::D3DCompileFromFile(shaderPath.data(), nullptr, nullptr, "PsMain", "ps_5_0", 0u, 0u, &shaderBlob, &errorBlob)))
+		{
+			std::wcout << "Error in compiling shader : " << shaderPath << ". Error : " << static_cast<const char*>(errorBlob->GetBufferPointer());
+			throw std::runtime_error("Shader compilation error.");
+		}
+
+		throwIfFailed(m_device->CreatePixelShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &pixelShader));
+
+		return pixelShader;
+	}
+
+	Microsoft::WRL::ComPtr<ID3D11InputLayout> Application::createInputLayout(ID3DBlob* vertexShaderBlob, std::span<const InputLayoutElementDesc> inputLayoutElementDescs)
+	{
+		comptr<ID3D11InputLayout> inputLayout{};
+
+		std::vector<D3D11_INPUT_ELEMENT_DESC> inputElementDescs{};
+		inputElementDescs.reserve(inputLayoutElementDescs.size());
+
+		for (const auto& inputLayoutElementDesc : inputLayoutElementDescs)
+		{
+			inputElementDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC
+				{
+					.SemanticName = inputLayoutElementDesc.semanticName.c_str(),
+					.SemanticIndex = 0u,
+					.Format = inputLayoutElementDesc.format,
+					.InputSlot = 0u,
+					.AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT,
+					.InputSlotClass = inputLayoutElementDesc.inputClassification,
+					.InstanceDataStepRate = 0u,
+				});
+		}
+
+		throwIfFailed(m_device->CreateInputLayout(inputElementDescs.data(), static_cast<uint32_t>(inputElementDescs.size()), vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), &inputLayout));
+
+		return inputLayout;
+	}
+
+	GraphicsPipeline Application::createGraphicsPipeline(const GraphicsPipelineCreationDesc& pipelineCreationDesc)
+	{
+		comptr<ID3DBlob> vertexShaderBlob{};
+		
+		comptr<ID3D11VertexShader> vertexShader = createVertexShader(pipelineCreationDesc.vertexShaderPath, vertexShaderBlob);
+
+		const GraphicsPipeline pipeline
+		{
+			.vertexShader = vertexShader,
+			.pixelShader = createPixelShader(pipelineCreationDesc.pixelShaderPath),
+			.inputLayout = createInputLayout(vertexShaderBlob.Get(), pipelineCreationDesc.inputLayoutElements),
+			.primitiveTopology = pipelineCreationDesc.primitiveTopology,
+			.vertexSize = pipelineCreationDesc.vertexSize,
+
+		};
+
+		return pipeline;
 	}
 }
 

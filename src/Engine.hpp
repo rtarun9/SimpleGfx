@@ -12,5 +12,8 @@ public:
 	void render() override;
 
 private:
+	sgfx::GraphicsPipeline m_pipeline{};
+
+	comptr<ID3D11Buffer> m_vertexBuffer{};
 };
 
