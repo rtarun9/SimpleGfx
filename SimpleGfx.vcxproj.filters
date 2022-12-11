@@ -15,7 +15,13 @@
     <ClInclude Include="include\Application.hpp">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\Camera.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\Engine.hpp">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Model.hpp">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\Pch.hpp">
@@ -32,10 +38,16 @@
     <ClCompile Include="src\Application.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="src\Camera.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="src\Engine.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\Main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Model.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="src\Pch.cpp">
@@ -44,6 +56,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <None Include="shaders\TestShader.hlsl">
+      <Filter>shaders</Filter>
+    </None>
     <None Include="shaders\TriangleShader.hlsl">
       <Filter>shaders</Filter>
     </None>

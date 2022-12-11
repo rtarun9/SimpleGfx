@@ -15,6 +15,20 @@ namespace sgfx
         math::XMFLOAT2 texCoord{};
     };
 
+    struct ModelVertex
+    {
+        math::XMFLOAT3 position{};
+        math::XMFLOAT2 textureCoord{};
+        math::XMFLOAT3 normal{};
+        math::XMFLOAT4 tangent{};
+        math::XMFLOAT3 biTangent{};
+    };
+
+    struct alignas(256) SceneBuffer
+    {
+        math::XMMATRIX viewProjectionMatrix;
+    };
+
     struct InputLayoutElementDesc
     {
         std::string semanticName{};
@@ -32,6 +46,13 @@ namespace sgfx
     {
         D3D11_USAGE usage;
         uint32_t bindFlags{};
+    };
+
+    template <typename T> struct ConstantBuffer
+    {
+        wrl::ComPtr<ID3D11Buffer> buffer{};
+        T data{};
+        uint8_t* mappedPointer{};
     };
 
     struct GraphicsPipelineCreationDesc

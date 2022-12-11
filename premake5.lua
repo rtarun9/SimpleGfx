@@ -14,6 +14,8 @@ project "SimpleGfx"
     
     targetdir "bin/%{cfg.buildcfg}"
     
+    staticruntime "Off"
+
     nuget 
     { 
         "sdl2.v140:2.0.4", 

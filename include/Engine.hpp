@@ -8,13 +8,15 @@ class Engine final : public sgfx::Application
     Engine(const std::string_view windowTitle);
 
     void loadContent() override;
-    void update() override;
+    void update(const float deltaTime) override;
     void render() override;
 
   private:
     sgfx::GraphicsPipeline m_pipeline{};
 
-    comptr<ID3D11Buffer> m_vertexBuffer{};
-    comptr<ID3D11SamplerState> m_sampler{};
-    comptr<ID3D11ShaderResourceView> m_srv{};
+    sgfx::ConstantBuffer<sgfx::SceneBuffer> m_sceneBuffer{};
+
+    sgfx::Model m_cube{};
+
+    comptr<ID3D11DepthStencilView> m_dsv{};
 };

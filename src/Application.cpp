@@ -2,6 +2,10 @@
 
 #include "Application.hpp"
 
+#include <imgui.h>
+#include <imgui_impl_dx11.h>
+#include <imgui_impl_sdl.h>
+
 #include <SDL.h>
 #include <SDL_syswm.h>
 
@@ -21,12 +25,17 @@ namespace sgfx
 
             loadContent();
 
+            std::chrono::high_resolution_clock clock{};
+            std::chrono::high_resolution_clock::time_point previousFrameTime{};
+
             bool quit = false;
             while (!quit)
             {
                 SDL_Event event{};
                 while (SDL_PollEvent(&event))
                 {
+                    ImGui_ImplSDL2_ProcessEvent(&event);
+
                     if (event.type == SDL_QUIT)
                     {
                         quit = true;
@@ -37,9 +46,23 @@ namespace sgfx
                     {
                         quit = true;
                     }
+
+                    m_camera.handleInput(Keys::W, keyboardState[SDL_SCANCODE_W]);
+                    m_camera.handleInput(Keys::A, keyboardState[SDL_SCANCODE_A]);
+                    m_camera.handleInput(Keys::S, keyboardState[SDL_SCANCODE_S]);
+                    m_camera.handleInput(Keys::D, keyboardState[SDL_SCANCODE_D]);
+
+                    m_camera.handleInput(Keys::AUp, keyboardState[SDL_SCANCODE_UP]);
+                    m_camera.handleInput(Keys::ALeft, keyboardState[SDL_SCANCODE_LEFT]);
+                    m_camera.handleInput(Keys::ADown, keyboardState[SDL_SCANCODE_DOWN]);
+                    m_camera.handleInput(Keys::ARight, keyboardState[SDL_SCANCODE_RIGHT]);
                 }
 
-                update();
+                const auto currentFrameTime = clock.now();
+                const float deltaTime = static_cast<float>((currentFrameTime - previousFrameTime).count() * 1e-9);
+                previousFrameTime = currentFrameTime;
+
+                update(deltaTime);
                 render();
             }
         }
@@ -53,7 +76,7 @@ namespace sgfx
     void Application::init()
     {
         // Initialize SDL2 and create window.
-        if (SDL_Init(SDL_INIT_VIDEO) < 0)
+        if (SDL_Init(SDL_INIT_EVERYTHING) < 0)
         {
             fatalError("Failed to initialize SDL2.");
         }
@@ -90,12 +113,25 @@ namespace sgfx
         createDeviceResources();
         createSwapchainResources();
 
+        // Init Imgui.
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+
+        ImGui::StyleColorsDark();
+        ImGui_ImplSDL2_InitForD3D(m_window);
+        ImGui_ImplDX11_Init(m_device.Get(), m_deviceContext.Get());
+
         // Create the fallback texture that will be used if some texture does not exist but the shader requires something to be bound at that slot.
         m_fallbackTexture = createTexture(L"assets/textures/Default.png");
     }
 
     void Application::cleanup()
     {
+
+        ImGui_ImplDX11_Shutdown();
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext();
+
         SDL_DestroyWindow(m_window);
         SDL_Quit();
     }
@@ -321,5 +357,33 @@ namespace sgfx
         throwIfFailed(m_device->CreateSamplerState(&samplerDesc, &sampler));
 
         return sampler;
+    }
+
+    Model Application::createModel(const std::string_view modelPath)
+    {
+        Model model(m_device.Get(), m_fallbackTexture.Get(), modelPath);
+        return model;
+    }
+    wrl::ComPtr<ID3D11DepthStencilView> Application::createDepthStencilView()
+    {
+        comptr<ID3D11DepthStencilView> dsv{};
+
+        comptr<ID3D11Texture2D> depthBuffer{};
+
+        const D3D11_TEXTURE2D_DESC depthStencilBufferDesc = {
+            .Width = m_windowWidth,
+            .Height = m_windowHeight,
+            .MipLevels = 1u,
+            .ArraySize = 1u,
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .SampleDesc = {1u, 0u},
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_DEPTH_STENCIL,
+        };
+
+        throwIfFailed(m_device->CreateTexture2D(&depthStencilBufferDesc, nullptr, &depthBuffer));
+        throwIfFailed(m_device->CreateDepthStencilView(depthBuffer.Get(), nullptr, &dsv));
+
+        return dsv;
     }
 }

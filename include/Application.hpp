@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Camera.hpp"
+#include "Model.hpp"
+
 struct SDL_Window;
 
 namespace sgfx
@@ -17,8 +20,10 @@ namespace sgfx
         virtual void cleanup();
 
         virtual void loadContent() = 0;
-        virtual void update() = 0;
+        virtual void update(const float deltaTime) = 0;
         virtual void render() = 0;
+
+        template <typename T> void updateConstantBuffer(ConstantBuffer<T>& buffer) const;
 
         void bindPipeline(const GraphicsPipeline& pipeline);
         void bindTexturePS(ID3D11ShaderResourceView* const srv, const uint32_t bindSlot);
@@ -33,8 +38,11 @@ namespace sgfx
         [[nodiscard]] wrl::ComPtr<ID3D11ShaderResourceView> createTexture(const std::wstring_view texturePath);
         [[nodiscard]] wrl::ComPtr<ID3D11SamplerState> createSampler(const SamplerCreationDesc& samplerCreationDesc);
 
-        template <typename T> [[nodiscard]] wrl::ComPtr<ID3D11Buffer> createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data = {});
+        [[nodiscard]] Model createModel(const std::string_view modelPath);
 
+        [[nodiscard]] wrl::ComPtr<ID3D11DepthStencilView> createDepthStencilView();
+
+        template <typename T> [[nodiscard]] wrl::ComPtr<ID3D11Buffer> createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data = {});
 
       private:
         void createDeviceResources();
@@ -61,29 +69,44 @@ namespace sgfx
 
         D3D11_VIEWPORT m_viewport{};
 
+        Camera m_camera{};
+
         // Default / Fallback resources.
         comptr<ID3D11ShaderResourceView> m_fallbackTexture{};
     };
+
+    template <typename T> inline void Application::updateConstantBuffer(ConstantBuffer<T>& buffer) const
+    {
+        m_deviceContext->UpdateSubresource(buffer.buffer.Get(), 0u, nullptr, &buffer.data, 0u, 0u);
+    }
 
     template <typename T> inline wrl::ComPtr<ID3D11Buffer> Application::createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data)
     {
         comptr<ID3D11Buffer> buffer{};
 
-        const D3D11_BUFFER_DESC bufferDesc = {
-            .ByteWidth = static_cast<uint32_t>(data.size_bytes()),
-            .Usage = bufferCreationDesc.usage,
-            .BindFlags = bufferCreationDesc.bindFlags,
-        };
-
         if (data.size() != 0)
         {
+            const D3D11_BUFFER_DESC bufferDesc = {
+                .ByteWidth = static_cast<uint32_t>(data.size_bytes()),
+                .Usage = bufferCreationDesc.usage,
+                .BindFlags = bufferCreationDesc.bindFlags,
+            };
+
             const D3D11_SUBRESOURCE_DATA resourceData = {.pSysMem = data.data()};
 
             throwIfFailed(m_device->CreateBuffer(&bufferDesc, &resourceData, &buffer));
         }
         else
         {
-            // Some stuff here ?
+            // If the code reaches here, this buffer is a constant buffer.
+            const D3D11_BUFFER_DESC bufferDesc = {
+                .ByteWidth = static_cast<uint32_t>(sizeof(T)),
+                .Usage = bufferCreationDesc.usage,
+                .BindFlags = bufferCreationDesc.bindFlags,
+                .CPUAccessFlags = 0u,
+            };
+
+            throwIfFailed(m_device->CreateBuffer(&bufferDesc, nullptr, &buffer));
         }
 
         return buffer;
