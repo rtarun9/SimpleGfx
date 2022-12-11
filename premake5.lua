@@ -14,8 +14,13 @@ project "SimpleGfx"
     
     targetdir "bin/%{cfg.buildcfg}"
     
-    nuget { "sdl2.v140:2.0.4", "sdl2.v140.redist:2.0.4" }
-    
+    nuget 
+    { 
+        "sdl2.v140:2.0.4", 
+        "sdl2.v140.redist:2.0.4",
+        "directxtex_desktop_2019:2022.10.18.1"
+    }
+
     pchheader "Pch.hpp"
     pchsource "src/Pch.cpp"
 

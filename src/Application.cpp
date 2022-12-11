@@ -5,6 +5,8 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 
+#include <DirectXTex.h>
+
 namespace sgfx
 {
     Application::Application(const std::string_view windowTitle) : m_windowTitle(windowTitle) {}
@@ -87,6 +89,9 @@ namespace sgfx
         // Initialize graphics back end.
         createDeviceResources();
         createSwapchainResources();
+
+        // Create the fallback texture that will be used if some texture does not exist but the shader requires something to be bound at that slot.
+        m_fallbackTexture = createTexture(L"assets/textures/Default.png");
     }
 
     void Application::cleanup()
@@ -131,8 +136,13 @@ namespace sgfx
         if constexpr (SGFX_DEBUG)
         {
             // Enable debug layer.
-            comptr<ID3D11Debug> debug{};
-            throwIfFailed(m_device.As(&debug));
+            throwIfFailed(m_device.As(&m_debug));
+
+            // Setup info queue.
+            throwIfFailed(m_device.As(&m_infoQueue));
+            throwIfFailed(m_infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, true));
+            throwIfFailed(m_infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, true));
+            throwIfFailed(m_infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_WARNING, true));
         }
     }
 
@@ -195,6 +205,18 @@ namespace sgfx
         m_deviceContext->PSSetShader(pipeline.pixelShader.Get(), nullptr, 0u);
     }
 
+    void Application::bindTexturePS(ID3D11ShaderResourceView* const srv, const uint32_t bindSlot)
+    {
+        if (!srv)
+        {
+            m_deviceContext->PSSetShaderResources(bindSlot, 1u, m_fallbackTexture.GetAddressOf());
+        }
+        else
+        {
+            m_deviceContext->PSSetShaderResources(bindSlot, 1u, &srv);
+        }
+    }
+
     Microsoft::WRL::ComPtr<ID3D11PixelShader> Application::createPixelShader(const std::wstring_view shaderPath)
     {
         comptr<ID3D11PixelShader> pixelShader{};
@@ -255,5 +277,49 @@ namespace sgfx
             .primitiveTopology = pipelineCreationDesc.primitiveTopology,
             .vertexSize = pipelineCreationDesc.vertexSize,
         };
+    }
+
+    wrl::ComPtr<ID3D11ShaderResourceView> Application::createTexture(const std::wstring_view texturePath)
+    {
+        // Main reference : https://github.com/GraphicsProgramming/learnd3d11/blob/main/src/Cpp/1-getting-started/1-3-1-Texturing/TexturingApplication.cpp.
+
+        comptr<ID3D11ShaderResourceView> srv{};
+
+        DirectX::TexMetadata metaData{};
+        DirectX::ScratchImage scratchImage{};
+
+        if (FAILED(DirectX::LoadFromWICFile(texturePath.data(), DirectX::WIC_FLAGS_NONE, &metaData, scratchImage)))
+        {
+            std::wcout << L"Failed to load texture from path : " << texturePath << L'\n';
+            throw std::runtime_error("Texture Loading Error");
+        }
+
+        DirectX::ScratchImage mipChain{};
+        throwIfFailed(DirectX::GenerateMipMaps(scratchImage.GetImages(), scratchImage.GetImageCount(), metaData, DirectX::TEX_FILTER_DEFAULT, 0u, mipChain));
+
+        comptr<ID3D11Resource> texture{};
+        throwIfFailed(DirectX::CreateTexture(m_device.Get(), mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), &texture));
+
+        throwIfFailed(DirectX::CreateShaderResourceView(m_device.Get(), mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), &srv));
+
+        return srv;
+    }
+
+    wrl::ComPtr<ID3D11SamplerState> Application::createSampler(const SamplerCreationDesc& samplerCreationDesc)
+    {
+        comptr<ID3D11SamplerState> sampler{};
+
+        const D3D11_SAMPLER_DESC samplerDesc = {
+            .Filter = samplerCreationDesc.filter,
+            .AddressU = samplerCreationDesc.addressMode,
+            .AddressV = samplerCreationDesc.addressMode,
+            .AddressW = samplerCreationDesc.addressMode,
+            .MaxAnisotropy = D3D11_MAX_MAXANISOTROPY,
+            .ComparisonFunc = D3D11_COMPARISON_NEVER,
+        };
+
+        throwIfFailed(m_device->CreateSamplerState(&samplerDesc, &sampler));
+
+        return sampler;
     }
 }

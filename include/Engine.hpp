@@ -15,4 +15,6 @@ class Engine final : public sgfx::Application
     sgfx::GraphicsPipeline m_pipeline{};
 
     comptr<ID3D11Buffer> m_vertexBuffer{};
+    comptr<ID3D11SamplerState> m_sampler{};
+    comptr<ID3D11ShaderResourceView> m_srv{};
 };

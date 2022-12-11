@@ -8,11 +8,24 @@ namespace sgfx
         math::XMFLOAT3 color{};
     };
 
+    struct VertexPosColorTexCoord
+    {
+        math::XMFLOAT3 position{};
+        math::XMFLOAT3 color{};
+        math::XMFLOAT2 texCoord{};
+    };
+
     struct InputLayoutElementDesc
     {
         std::string semanticName{};
         DXGI_FORMAT format{};
         D3D11_INPUT_CLASSIFICATION inputClassification{};
+    };
+
+    struct SamplerCreationDesc
+    {
+        D3D11_FILTER filter{};
+        D3D11_TEXTURE_ADDRESS_MODE addressMode{};
     };
 
     struct BufferCreationDesc

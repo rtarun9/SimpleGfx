@@ -21,6 +21,7 @@ namespace sgfx
         virtual void render() = 0;
 
         void bindPipeline(const GraphicsPipeline& pipeline);
+        void bindTexturePS(ID3D11ShaderResourceView* const srv, const uint32_t bindSlot);
 
         [[nodiscard]] wrl::ComPtr<ID3D11VertexShader> createVertexShader(const std::wstring_view shaderPath, wrl::ComPtr<ID3DBlob>& outShaderBlob);
         [[nodiscard]] wrl::ComPtr<ID3D11PixelShader> createPixelShader(const std::wstring_view shaderPath);
@@ -29,7 +30,11 @@ namespace sgfx
 
         [[nodiscard]] GraphicsPipeline createGraphicsPipeline(const GraphicsPipelineCreationDesc& pipelineCreationDesc);
 
+        [[nodiscard]] wrl::ComPtr<ID3D11ShaderResourceView> createTexture(const std::wstring_view texturePath);
+        [[nodiscard]] wrl::ComPtr<ID3D11SamplerState> createSampler(const SamplerCreationDesc& samplerCreationDesc);
+
         template <typename T> [[nodiscard]] wrl::ComPtr<ID3D11Buffer> createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data = {});
+
 
       private:
         void createDeviceResources();
@@ -47,12 +52,17 @@ namespace sgfx
         std::string m_windowTitle{};
 
         comptr<ID3D11Device> m_device{};
+        comptr<ID3D11Debug> m_debug{};
+        comptr<ID3D11InfoQueue> m_infoQueue{};
         comptr<ID3D11DeviceContext> m_deviceContext{};
         comptr<IDXGIFactory6> m_factory{};
         comptr<IDXGISwapChain1> m_swapchain{};
         comptr<ID3D11RenderTargetView> m_renderTargetView{};
 
         D3D11_VIEWPORT m_viewport{};
+
+        // Default / Fallback resources.
+        comptr<ID3D11ShaderResourceView> m_fallbackTexture{};
     };
 
     template <typename T> inline wrl::ComPtr<ID3D11Buffer> Application::createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data)
