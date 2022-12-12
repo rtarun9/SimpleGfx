@@ -34,8 +34,8 @@ namespace sgfx
         float m_pitch{};
         float m_yaw{};
 
-        float m_movementSpeed{50.0f};
-        float m_rotationSpeed{1.5f};
+        float m_movementSpeed{20.0f};
+        float m_rotationSpeed{1.0f};
 
         std::array<bool, enumClassValue(Keys::TotalKeys)> m_keys{};
     };

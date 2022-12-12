@@ -10,15 +10,19 @@ struct VSInput
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 textureCoord : TEX_COORD;
 };
 
 cbuffer sceneBuffer : register(b0)
 {
+    row_major matrix viewMatrix;
     row_major matrix viewProjectionMatrix;
     float3 pointLightColor;
     float padding;
-}
+    float3 pointLightPosition;
+    float padding2;
+    float3 cameraPosition;
+    float padding3;
+};
 
 cbuffer transformBuffer : register(b1)
 {
@@ -30,21 +34,8 @@ VSOutput VsMain(VSInput input)
 {
     VSOutput output;
     output.position = mul(mul(float4(input.position, 1.0f), modelMatrix), viewProjectionMatrix);
-    output.textureCoord = input.textureCoord;
 
     return output;
 }
 
-Texture2D<float4> tex : register(t0);
-SamplerState smp : register(s0);
-
-float4 PsMain(VSOutput input) : SV_Target
-{
-    float4 output = tex.Sample(smp, input.textureCoord);
-    if (output.a < 0.2f)
-    {
-        discard;
-    }
-
-    return output;
-}
+float4 PsMain(VSOutput input) : SV_Target { return float4(pointLightColor, 1.0f); }

@@ -3,6 +3,10 @@
 #include "Camera.hpp"
 #include "Model.hpp"
 
+#include <imgui.h>
+#include <imgui_impl_dx11.h>
+#include <imgui_impl_sdl.h>
+
 struct SDL_Window;
 
 namespace sgfx

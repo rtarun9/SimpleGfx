@@ -18,8 +18,6 @@ project "SimpleGfx"
 
     nuget 
     { 
-        "sdl2.v140:2.0.4", 
-        "sdl2.v140.redist:2.0.4",
         "directxtex_desktop_2019:2022.10.18.1"
     }
 

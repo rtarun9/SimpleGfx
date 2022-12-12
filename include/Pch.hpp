@@ -13,6 +13,7 @@ constexpr bool SGFX_DEBUG = false;
 #include <source_location>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <d3d11.h>

@@ -26,7 +26,14 @@ namespace sgfx
 
     struct alignas(256) SceneBuffer
     {
-        math::XMMATRIX viewProjectionMatrix;
+        math::XMMATRIX viewMatrix{};
+        math::XMMATRIX viewProjectionMatrix{};
+        math::XMFLOAT3 pointLightColor{1.0f, 1.0f, 1.0f};
+        float padding;
+        math::XMFLOAT3 viewSpacePointLightPosition{};
+        float padding2;
+        math::XMFLOAT3 cameraPosition{};
+        float padding3;
     };
 
     struct InputLayoutElementDesc

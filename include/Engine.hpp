@@ -12,11 +12,13 @@ class Engine final : public sgfx::Application
     void render() override;
 
   private:
+    comptr<ID3D11DepthStencilView> m_dsv{};
+
     sgfx::GraphicsPipeline m_pipeline{};
+    sgfx::GraphicsPipeline m_lightPipeline{};
 
     sgfx::ConstantBuffer<sgfx::SceneBuffer> m_sceneBuffer{};
 
-    sgfx::Model m_cube{};
-
-    comptr<ID3D11DepthStencilView> m_dsv{};
+    std::unordered_map<std::string, sgfx::Model> m_renderables{};
+    sgfx::Model m_light{};
 };

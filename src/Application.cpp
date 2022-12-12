@@ -2,12 +2,8 @@
 
 #include "Application.hpp"
 
-#include <imgui.h>
-#include <imgui_impl_dx11.h>
-#include <imgui_impl_sdl.h>
-
-#include <SDL.h>
-#include <SDL_syswm.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_syswm.h>
 
 #include <DirectXTex.h>
 
@@ -75,6 +71,10 @@ namespace sgfx
 
     void Application::init()
     {
+        // Set DPI awareness on Windows
+        SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+        SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
+
         // Initialize SDL2 and create window.
         if (SDL_Init(SDL_INIT_EVERYTHING) < 0)
         {
@@ -91,9 +91,9 @@ namespace sgfx
         const uint32_t monitorWidth = displayMode.w;
         const uint32_t monitorHeight = displayMode.h;
 
-        // Window must cover 90% of the screen.
-        m_windowWidth = static_cast<uint32_t>(monitorWidth * 0.90f);
-        m_windowHeight = static_cast<uint32_t>(monitorHeight * 0.90f);
+        // Window must cover 100% of the screen.
+        m_windowWidth = static_cast<uint32_t>(monitorWidth * 1.00f);
+        m_windowHeight = static_cast<uint32_t>(monitorHeight * 1.00f);
 
         // Not made const as SDL_DestroyWindow requires us to pass a non - const SDL_Window.
         SDL_Window* m_window = SDL_CreateWindow("LunarEngine", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, m_windowWidth, m_windowHeight, SDL_WINDOW_ALLOW_HIGHDPI);
