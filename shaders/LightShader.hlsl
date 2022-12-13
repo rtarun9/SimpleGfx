@@ -28,6 +28,7 @@ cbuffer transformBuffer : register(b1)
 {
     row_major matrix modelMatrix;
     row_major matrix inverseModelMatrix;
+    row_major matrix inverseModelViewMatrix;
 };
 
 VSOutput VsMain(VSInput input)

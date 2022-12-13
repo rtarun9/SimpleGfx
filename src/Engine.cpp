@@ -6,6 +6,33 @@ Engine::Engine(const std::string_view windowTitle) : sgfx::Application(windowTit
 
 void Engine::loadContent()
 {
+    // Wrap the createModel functions in their own jthreads for speed. Not a very elegant solution, in the future the application class will take care of this.
+
+    std::jthread cube1Thread([&]() { m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf"); });
+
+    std::jthread cube2Thread(
+        [&]()
+        {
+            m_renderables["cube2"] = createModel("assets/models/Cube/glTF/Cube.gltf");
+
+            m_renderables["cube2"].getTransformComponent()->translate = {5.0f, 0.0f, -2.0f};
+        });
+
+    std::jthread sponzaThread(
+        [&]()
+        {
+            m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb");
+            m_renderables["sponza"].getTransformComponent()->scale = {0.1f, 0.1f, 0.1f};
+        });
+    
+    std::jthread scifiHelmetThread(
+        [&]()
+        {
+            m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf");
+        });
+   
+
+
     m_pipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/PhongShader.hlsl",
         .pixelShaderPath = L"shaders/PhongShader.hlsl",
@@ -36,18 +63,26 @@ void Engine::loadContent()
         .vertexSize = sizeof(sgfx::ModelVertex),
     });
 
+    m_fullscreenPassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+        .vertexShaderPath = L"shaders/FullscreenPass.hlsl",
+        .pixelShaderPath = L"shaders/FullscreenPass.hlsl",
+        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+    });
+
     m_sceneBuffer.buffer = createBuffer<sgfx::TransformBuffer>(sgfx::BufferCreationDesc{.usage = D3D11_USAGE_DEFAULT, .bindFlags = D3D11_BIND_CONSTANT_BUFFER});
-
-    m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf");
-    m_renderables["cube2"] = createModel("assets/models/Cube/glTF/Cube.gltf");
-
-    m_renderables["cube2"].getTransformComponent()->translate = {5.0f, 0.0f, -2.0f};
 
     m_light = createModel("assets/models/Cube/glTF/Cube.gltf");
     m_light.getTransformComponent()->scale = {0.2f, 0.2f, 0.2f};
     m_light.getTransformComponent()->translate = {2.2f, 2.2f, -0.5f};
 
     m_dsv = createDepthStencilView();
+
+    m_offscreenRT = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+
+    m_offscreenSampler = createSampler(sgfx::SamplerCreationDesc{
+        .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
+        .addressMode = D3D11_TEXTURE_ADDRESS_WRAP,
+    });
 }
 
 void Engine::update(const float deltaTime)
@@ -72,10 +107,10 @@ void Engine::update(const float deltaTime)
 
     for (auto& [name, renderable] : m_renderables)
     {
-        renderable.updateTransformBuffer(m_deviceContext.Get());
+        renderable.updateTransformBuffer(viewMatrix, m_deviceContext.Get());
     }
 
-    m_light.updateTransformBuffer(m_deviceContext.Get());
+    m_light.updateTransformBuffer(viewMatrix, m_deviceContext.Get());
 }
 
 void Engine::render()
@@ -121,15 +156,16 @@ void Engine::render()
 
     auto& ctx = m_deviceContext;
 
-    constexpr std::array<float, 4> clearColor{0.2f, 0.2f, 0.2f, 1.0f};
-    constexpr uint32_t offset = 0u;
+    constexpr std::array<float, 4> clearColor{0.0f, 0.0f, 0.0f, 1.0f};
 
     ctx->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
 
     ctx->ClearRenderTargetView(m_renderTargetView.Get(), clearColor.data());
-    ctx->RSSetViewports(1u, &m_viewport);
+    ctx->ClearRenderTargetView(m_offscreenRT.rtv.Get(), clearColor.data());
 
-    ctx->OMSetRenderTargets(1u, m_renderTargetView.GetAddressOf(), m_dsv.Get());
+    // Render to offscreen RT.
+    ctx->RSSetViewports(1u, &m_viewport);
+    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), m_dsv.Get());
 
     bindPipeline(m_pipeline);
 
@@ -141,10 +177,25 @@ void Engine::render()
     }
 
     bindPipeline(m_lightPipeline);
+
     ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
     ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
 
     m_light.render(ctx.Get());
+
+    // Render to swapchain backbuffer RTV.
+
+    ctx->RSSetViewports(1u, &m_viewport);
+    ctx->OMSetRenderTargets(1u, m_renderTargetView.GetAddressOf(), nullptr);
+
+    bindPipeline(m_fullscreenPassPipeline);
+    bindTexturePS(m_offscreenRT.srv.Get(), 0u);
+    ctx->PSSetSamplers(0u, 1u, m_offscreenSampler.GetAddressOf());
+
+    ctx->Draw(3u, 0u);
+
+    wrl::ComPtr<ID3D11ShaderResourceView> nullSrv{nullptr};
+    ctx->PSSetShaderResources(0u, 1u, nullSrv.GetAddressOf());
 
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

@@ -18,24 +18,25 @@ namespace sgfx
     {
         math::XMMATRIX modelMatrix{};
         math::XMMATRIX inverseModelMatrix{};
+        math::XMMATRIX inverseModelViewMatrix{};
     };
 
     struct PBRMaterial
     {
         wrl::ComPtr<ID3D11ShaderResourceView> albedoTextureSrv{};
-        wrl::ComPtr<ID3D11SamplerState> albedoTextureSamplerState{};
+        uint32_t albedoTextureSamplerStateIndex{};
 
         wrl::ComPtr<ID3D11ShaderResourceView> normalTexture{};
-        wrl::ComPtr<ID3D11SamplerState> normalTextureSamplerState{};
+        uint32_t normalTextureSamplerStateIndex{};
 
         wrl::ComPtr<ID3D11ShaderResourceView> metalRoughnessTexture{};
-        wrl::ComPtr<ID3D11SamplerState> metalRoughnessTextureSamplerState{};
+        uint32_t metalRoughnessTextureSamplerStateIndex{};
 
         wrl::ComPtr<ID3D11ShaderResourceView> aoTexture{};
-        wrl::ComPtr<ID3D11SamplerState> aoTextureSamplerState{};
+        uint32_t aoTextureSamplerStateIndex{};
 
         wrl::ComPtr<ID3D11ShaderResourceView> emissiveTexture{};
-        wrl::ComPtr<ID3D11SamplerState> emissiveTextureSamplerState{};
+        uint32_t emissiveTextureSamplerStateIndex{};
     };
 
     struct Mesh
@@ -55,18 +56,19 @@ namespace sgfx
 
         TransformComponent* getTransformComponent() { return &m_transformComponent; }
 
-        void updateTransformBuffer(ID3D11DeviceContext* const deviceContext);
+        void updateTransformBuffer(const math::XMMATRIX viewMatrix, ID3D11DeviceContext* const deviceContext);
 
         void render(ID3D11DeviceContext* const deviceContext) const;
 
       private:
-        [[nodiscard]] std::vector<wrl::ComPtr<ID3D11SamplerState>> loadSamplers(ID3D11Device* const device, tinygltf::Model* const model);
-        void loadMaterials(ID3D11Device* const device, const std::span<const wrl::ComPtr<ID3D11SamplerState>> samplers, tinygltf::Model* const model);
+        void loadSamplers(ID3D11Device* const device, tinygltf::Model* const model);
+        void loadMaterials(ID3D11Device* const device, tinygltf::Model* const model);
         void loadNode(ID3D11Device* const device, uint32_t nodeIndex, tinygltf::Model* const model);
 
       private:
         std::vector<Mesh> m_meshes{};
         std::vector<PBRMaterial> m_materials{};
+        std::vector<wrl::ComPtr<ID3D11SamplerState>> m_samplers{};
 
         std::string m_modelPath{};
         std::string m_modelDirectory{};

@@ -7,6 +7,8 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
+#define TINYGLTF_NOEXCEPTION
+#define JSON_NOEXCEPTION
 #define TINYGLTF_NO_INCLUDE_STB_IMAGE
 #define TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE
 #define TINYGLTF_IMPLEMENTATION
@@ -73,24 +75,32 @@ namespace sgfx
             }
         }
 
-        auto samplerMaterialThread = std::jthread([&]() { // Load samplers.
-            const std::vector<wrl::ComPtr<ID3D11SamplerState>> samplers = loadSamplers(device, &model);
-
-            // Load textures and materials.
-            loadMaterials(device, samplers, &model);
+        std::thread samplerThread([&]() { // Load samplers.
+            loadSamplers(device, &model);
         });
 
-        auto meshThread = std::jthread([&]() { // Build meshes.
-            tinygltf::Scene& scene = model.scenes[model.defaultScene];
+        std::thread materialThread( // Load materials.
+            [&]()
+            {
+                // Load textures and materials.
+                loadMaterials(device, &model);
+            });
 
+        tinygltf::Scene& scene = model.scenes[model.defaultScene];
+
+        std::thread meshThread([&]() { // Build meshes.
             for (const int& nodeIndex : scene.nodes)
             {
                 loadNode(device, nodeIndex, &model);
             }
         });
+
+        samplerThread.join();
+        materialThread.join();
+        meshThread.join();
     }
 
-    void Model::updateTransformBuffer(ID3D11DeviceContext* const deviceContext)
+    void Model::updateTransformBuffer(const math::XMMATRIX viewMatrix, ID3D11DeviceContext* const deviceContext)
     {
         const DirectX::XMVECTOR scalingVector = DirectX::XMLoadFloat3(&m_transformComponent.scale);
         const DirectX::XMVECTOR rotationVector = DirectX::XMLoadFloat3(&m_transformComponent.rotation);
@@ -101,6 +111,7 @@ namespace sgfx
         m_transformBuffer.data = {
             .modelMatrix = modelMatrix,
             .inverseModelMatrix = DirectX::XMMatrixInverse(nullptr, modelMatrix),
+            .inverseModelViewMatrix = DirectX::XMMatrixInverse(nullptr, modelMatrix * viewMatrix),
         };
 
         deviceContext->UpdateSubresource(m_transformBuffer.buffer.Get(), 0u, nullptr, &m_transformBuffer.data, 0u, 0u);
@@ -119,12 +130,25 @@ namespace sgfx
             deviceContext->IASetVertexBuffers(0u, 1u, mesh.vertexBuffer.GetAddressOf(), &stride, &offset);
             deviceContext->IASetIndexBuffer(mesh.indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0u);
 
-            const auto sampler = m_materials[mesh.materialIndex].albedoTextureSamplerState.GetAddressOf();
+            const auto albedoTexturesampler = m_materials[mesh.materialIndex].albedoTextureSamplerStateIndex == INVALID_INDEX_U32
+                                                  ? m_fallbackSamplerState.GetAddressOf()
+                                                  : m_samplers[m_materials[mesh.materialIndex].albedoTextureSamplerStateIndex].GetAddressOf();
 
             const auto albedoSrv = m_materials[mesh.materialIndex].albedoTextureSrv.GetAddressOf();
 
-            deviceContext->PSSetSamplers(0u, 1u, sampler);
+            const auto normalTextureSampler = m_materials[mesh.materialIndex].normalTextureSamplerStateIndex == INVALID_INDEX_U32
+                                                  ? m_fallbackSamplerState.GetAddressOf()
+                                                  : m_samplers[m_materials[mesh.materialIndex].normalTextureSamplerStateIndex].GetAddressOf();
+
+            const auto normalSrv = m_materials[mesh.materialIndex].normalTexture.GetAddressOf();
+
+            // Albedo texture and sampler.
+            deviceContext->PSSetSamplers(0u, 1u, albedoTexturesampler);
             deviceContext->PSSetShaderResources(0u, 1u, albedoSrv);
+
+            // Normal texture and sampler.
+            deviceContext->PSSetSamplers(1u, 1u, normalTextureSampler);
+            deviceContext->PSSetShaderResources(1u, 1u, normalSrv);
 
             deviceContext->DrawIndexed(mesh.indicesCount, 0u, 0u);
 
@@ -132,7 +156,7 @@ namespace sgfx
         }
     }
 
-    std::vector<wrl::ComPtr<ID3D11SamplerState>> Model::loadSamplers(ID3D11Device* const device, tinygltf::Model* const model)
+    void Model::loadSamplers(ID3D11Device* const device, tinygltf::Model* const model)
     {
         // Create fallback sampler.
         const D3D11_SAMPLER_DESC samplerDesc = {
@@ -146,9 +170,7 @@ namespace sgfx
 
         throwIfFailed(device->CreateSamplerState(&samplerDesc, &m_fallbackSamplerState));
 
-        std::vector<wrl::ComPtr<ID3D11SamplerState>> samplers{};
-
-        samplers.resize(model->samplers.size());
+        m_samplers.resize(model->samplers.size());
 
         size_t index{0};
 
@@ -285,14 +307,14 @@ namespace sgfx
 
             wrl::ComPtr<ID3D11SamplerState> samplerState{};
             throwIfFailed(device->CreateSamplerState(&samplerDesc, &samplerState));
-            samplers[index++] = std::move(samplerState);
+            m_samplers[index++] = std::move(samplerState);
         }
-
-        return samplers;
     }
 
-    void Model::loadMaterials(ID3D11Device* const device, const std::span<const wrl::ComPtr<ID3D11SamplerState>> samplers, tinygltf::Model* const model)
+    void Model::loadMaterials(ID3D11Device* const device, tinygltf::Model* const model)
     {
+        std::mutex textureCreationMutex{};
+
         auto createTexture = [&](tinygltf::Image& image, bool isSrgb)
         {
             const std::wstring texturePath = stringToWString(m_modelDirectory + image.uri);
@@ -302,7 +324,9 @@ namespace sgfx
             DirectX::TexMetadata metaData{};
             DirectX::ScratchImage scratchImage{};
 
-            const DirectX::WIC_FLAGS wicFlag = isSrgb ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
+            const DirectX::WIC_FLAGS wicFlag = isSrgb == true ? DirectX::WIC_FLAGS_DEFAULT_SRGB : DirectX::WIC_FLAGS_IGNORE_SRGB;
+
+            const std::lock_guard<std::mutex> lock(textureCreationMutex);
 
             if (FAILED(DirectX::LoadFromWICFile(texturePath.data(), wicFlag, &metaData, scratchImage)))
             {
@@ -328,56 +352,87 @@ namespace sgfx
         {
             PBRMaterial pbrMaterial{};
 
-            if (material.pbrMetallicRoughness.baseColorTexture.index >= 0)
-            {
+            std::jthread albedoThread(
+                [&]()
+                {
+                    if (material.pbrMetallicRoughness.baseColorTexture.index >= 0)
+                    {
 
-                tinygltf::Texture& albedoTexture = model->textures[material.pbrMetallicRoughness.baseColorTexture.index];
-                tinygltf::Image& albedoImage = model->images[albedoTexture.source];
+                        tinygltf::Texture& albedoTexture = model->textures[material.pbrMetallicRoughness.baseColorTexture.index];
+                        tinygltf::Image& albedoImage = model->images[albedoTexture.source];
 
-                pbrMaterial.albedoTextureSrv = createTexture(albedoImage, true);
-                pbrMaterial.albedoTextureSamplerState = samplers[albedoTexture.sampler];
-            }
-            else
-            {
-                pbrMaterial.albedoTextureSrv = m_fallbackSrv;
-                pbrMaterial.albedoTextureSamplerState = m_fallbackSamplerState;
-            }
+                        pbrMaterial.albedoTextureSrv = createTexture(albedoImage, true);
+                        pbrMaterial.albedoTextureSamplerStateIndex = albedoTexture.sampler;
+                    }
+                    else
+                    {
+                        pbrMaterial.albedoTextureSrv = m_fallbackSrv;
+                        pbrMaterial.albedoTextureSamplerStateIndex = INVALID_INDEX_U32;
+                    }
+                });
 
-            if (material.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0)
-            {
+            std::jthread metalRoughnessThread(
+                [&]()
+                {
+                    if (material.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0)
+                    {
 
-                tinygltf::Texture& metalRoughnessTexture = model->textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
-                tinygltf::Image& metalRoughnessImage = model->images[metalRoughnessTexture.source];
+                        tinygltf::Texture& metalRoughnessTexture = model->textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
+                        tinygltf::Image& metalRoughnessImage = model->images[metalRoughnessTexture.source];
 
-                pbrMaterial.metalRoughnessTexture = createTexture(metalRoughnessImage, false);
-                pbrMaterial.metalRoughnessTextureSamplerState = samplers[metalRoughnessTexture.sampler];
-            }
+                        pbrMaterial.metalRoughnessTexture = createTexture(metalRoughnessImage, false);
+                        pbrMaterial.metalRoughnessTextureSamplerStateIndex = metalRoughnessTexture.sampler;
+                    }
+                });
 
-            if (material.normalTexture.index >= 0)
-            {
-                tinygltf::Texture& normalTexture = model->textures[material.normalTexture.index];
-                tinygltf::Image& normalImage = model->images[normalTexture.source];
+            std::jthread normalThread(
+                [&]()
+                {
+                    if (material.normalTexture.index >= 0)
+                    {
+                        tinygltf::Texture& normalTexture = model->textures[material.normalTexture.index];
+                        tinygltf::Image& normalImage = model->images[normalTexture.source];
 
-                pbrMaterial.normalTexture = createTexture(normalImage, false);
-                pbrMaterial.normalTextureSamplerState = samplers[normalTexture.sampler];
-            }
+                        pbrMaterial.normalTexture = createTexture(normalImage, false);
+                        pbrMaterial.normalTextureSamplerStateIndex = normalTexture.sampler;
+                    }
+                    else
+                    {
+                        pbrMaterial.normalTextureSamplerStateIndex = INVALID_INDEX_U32;
+                    }
+                });
 
-            if (material.occlusionTexture.index >= 0)
-            {
-                tinygltf::Texture& aoTexture = model->textures[material.occlusionTexture.index];
-                tinygltf::Image& aoImage = model->images[aoTexture.source];
+            std::jthread occlusionThread(
+                [&]()
+                {
+                    if (material.occlusionTexture.index >= 0)
+                    {
+                        tinygltf::Texture& aoTexture = model->textures[material.occlusionTexture.index];
+                        tinygltf::Image& aoImage = model->images[aoTexture.source];
 
-                pbrMaterial.aoTexture = createTexture(aoImage, false);
-                pbrMaterial.aoTextureSamplerState = samplers[aoTexture.sampler];
-            }
-            if (material.emissiveTexture.index >= 0)
-            {
-                tinygltf::Texture& emissiveTexture = model->textures[material.emissiveTexture.index];
-                tinygltf::Image& emissiveImage = model->images[emissiveTexture.source];
+                        pbrMaterial.aoTexture = createTexture(aoImage, false);
+                        pbrMaterial.aoTextureSamplerStateIndex = aoTexture.sampler;
+                    }
+                });
 
-                pbrMaterial.emissiveTexture = createTexture(emissiveImage, true);
-                pbrMaterial.emissiveTextureSamplerState = samplers[emissiveTexture.sampler];
-            }
+            std::jthread emissiveThread(
+                [&]()
+                {
+                    if (material.emissiveTexture.index >= 0)
+                    {
+                        tinygltf::Texture& emissiveTexture = model->textures[material.emissiveTexture.index];
+                        tinygltf::Image& emissiveImage = model->images[emissiveTexture.source];
+
+                        pbrMaterial.emissiveTexture = createTexture(emissiveImage, true);
+                        pbrMaterial.emissiveTextureSamplerStateIndex = emissiveTexture.sampler;
+                    }
+                });
+
+            albedoThread.join();
+            metalRoughnessThread.join();
+            normalThread.join();
+            occlusionThread.join();
+            emissiveThread.join();
 
             m_materials[index++] = std::move(pbrMaterial);
         }

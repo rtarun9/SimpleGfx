@@ -41,6 +41,8 @@ namespace sgfx
 
         [[nodiscard]] wrl::ComPtr<ID3D11ShaderResourceView> createTexture(const std::wstring_view texturePath);
         [[nodiscard]] wrl::ComPtr<ID3D11SamplerState> createSampler(const SamplerCreationDesc& samplerCreationDesc);
+        
+        [[nodiscard]] RenderTarget createRenderTarget(const uint32_t width, const uint32_t height, const DXGI_FORMAT format);
 
         [[nodiscard]] Model createModel(const std::string_view modelPath);
 

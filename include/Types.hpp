@@ -2,6 +2,8 @@
 
 namespace sgfx
 {
+    static constexpr uint32_t INVALID_INDEX_U32 = -1;
+
     struct VertexPosColor
     {
         math::XMFLOAT3 position{};
@@ -75,12 +77,20 @@ namespace sgfx
 
     struct GraphicsPipeline
     {
-        Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader{};
-        Microsoft::WRL::ComPtr<ID3D11PixelShader> pixelShader{};
-        Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout{};
+        wrl::ComPtr<ID3D11VertexShader> vertexShader{};
+        wrl::ComPtr<ID3D11PixelShader> pixelShader{};
+        wrl::ComPtr<ID3D11InputLayout> inputLayout{};
 
         D3D11_PRIMITIVE_TOPOLOGY primitiveTopology{};
 
         uint32_t vertexSize{};
+    };
+
+    struct RenderTarget
+    {
+        wrl::ComPtr<ID3D11Texture2D> texture{};
+
+        wrl::ComPtr<ID3D11RenderTargetView> rtv{};
+        wrl::ComPtr<ID3D11ShaderResourceView> srv{};
     };
 }

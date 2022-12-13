@@ -96,7 +96,7 @@ namespace sgfx
         m_windowHeight = static_cast<uint32_t>(monitorHeight * 1.00f);
 
         // Not made const as SDL_DestroyWindow requires us to pass a non - const SDL_Window.
-        SDL_Window* m_window = SDL_CreateWindow("LunarEngine", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, m_windowWidth, m_windowHeight, SDL_WINDOW_ALLOW_HIGHDPI);
+        SDL_Window* m_window = SDL_CreateWindow("SimpleGfx", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, m_windowWidth, m_windowHeight, SDL_WINDOW_ALLOW_HIGHDPI);
 
         if (!m_window)
         {
@@ -188,7 +188,7 @@ namespace sgfx
         const DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
             .Width = m_windowWidth,
             .Height = m_windowHeight,
-            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+            .Format = DXGI_FORMAT_R10G10B10A2_UNORM,
             .SampleDesc = {1u, 0u},
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
             .BufferCount = 2u,
@@ -273,6 +273,11 @@ namespace sgfx
 
     Microsoft::WRL::ComPtr<ID3D11InputLayout> Application::createInputLayout(ID3DBlob* vertexShaderBlob, std::span<const InputLayoutElementDesc> inputLayoutElementDescs)
     {
+        if (inputLayoutElementDescs.size() == 0)
+        {
+            return nullptr;
+        }
+
         comptr<ID3D11InputLayout> inputLayout{};
 
         std::vector<D3D11_INPUT_ELEMENT_DESC> inputElementDescs{};
@@ -357,6 +362,50 @@ namespace sgfx
         throwIfFailed(m_device->CreateSamplerState(&samplerDesc, &sampler));
 
         return sampler;
+    }
+
+    RenderTarget Application::createRenderTarget(const uint32_t width, const uint32_t height, const DXGI_FORMAT format)
+    {
+        RenderTarget renderTarget{};
+
+        const D3D11_TEXTURE2D_DESC textureDesc = {
+            .Width = width,
+            .Height = height,
+            .MipLevels = 1u,
+            .ArraySize = 1u,
+            .Format = format,
+            .SampleDesc = {1u, 0u},
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+            .CPUAccessFlags = 0u,
+        };
+
+        throwIfFailed(m_device->CreateTexture2D(&textureDesc, nullptr, &renderTarget.texture));
+
+        const D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {
+            .Format = format,
+            .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
+            .Texture2D =
+                {
+                    .MipSlice = 0u,
+                },
+        };
+
+        throwIfFailed(m_device->CreateRenderTargetView(renderTarget.texture.Get(), &rtvDesc, &renderTarget.rtv));
+
+        const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+            .Format = format,
+            .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+            .Texture2D =
+                {
+                    .MostDetailedMip = 0u,
+                    .MipLevels = 1u,
+                },
+        };
+
+        throwIfFailed(m_device->CreateShaderResourceView(renderTarget.texture.Get(), &srvDesc, &renderTarget.srv));
+
+        return renderTarget;
     }
 
     Model Application::createModel(const std::string_view modelPath)

@@ -13,9 +13,12 @@ class Engine final : public sgfx::Application
 
   private:
     comptr<ID3D11DepthStencilView> m_dsv{};
+    sgfx::RenderTarget m_offscreenRT{};
+    comptr<ID3D11SamplerState> m_offscreenSampler{};
 
     sgfx::GraphicsPipeline m_pipeline{};
     sgfx::GraphicsPipeline m_lightPipeline{};
+    sgfx::GraphicsPipeline m_fullscreenPassPipeline{};
 
     sgfx::ConstantBuffer<sgfx::SceneBuffer> m_sceneBuffer{};
 
