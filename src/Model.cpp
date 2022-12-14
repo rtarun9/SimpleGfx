@@ -156,6 +156,45 @@ namespace sgfx
         }
     }
 
+    void Model::renderInstanced(ID3D11DeviceContext* const deviceContext, const uint32_t instanceCount) const 
+    {
+        deviceContext->VSSetConstantBuffers(1u, 1u, m_transformBuffer.buffer.GetAddressOf());
+        uint32_t meshIndex = 0u;
+
+        for (const auto& mesh : m_meshes)
+        {
+            constexpr uint32_t stride = sizeof(ModelVertex);
+            constexpr uint32_t offset = 0u;
+
+            deviceContext->IASetVertexBuffers(0u, 1u, mesh.vertexBuffer.GetAddressOf(), &stride, &offset);
+            deviceContext->IASetIndexBuffer(mesh.indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0u);
+
+            const auto albedoTexturesampler = m_materials[mesh.materialIndex].albedoTextureSamplerStateIndex == INVALID_INDEX_U32
+                                                  ? m_fallbackSamplerState.GetAddressOf()
+                                                  : m_samplers[m_materials[mesh.materialIndex].albedoTextureSamplerStateIndex].GetAddressOf();
+
+            const auto albedoSrv = m_materials[mesh.materialIndex].albedoTextureSrv.GetAddressOf();
+
+            const auto normalTextureSampler = m_materials[mesh.materialIndex].normalTextureSamplerStateIndex == INVALID_INDEX_U32
+                                                  ? m_fallbackSamplerState.GetAddressOf()
+                                                  : m_samplers[m_materials[mesh.materialIndex].normalTextureSamplerStateIndex].GetAddressOf();
+
+            const auto normalSrv = m_materials[mesh.materialIndex].normalTexture.GetAddressOf();
+
+            // Albedo texture and sampler.
+            deviceContext->PSSetSamplers(0u, 1u, albedoTexturesampler);
+            deviceContext->PSSetShaderResources(0u, 1u, albedoSrv);
+
+            // Normal texture and sampler.
+            deviceContext->PSSetSamplers(1u, 1u, normalTextureSampler);
+            deviceContext->PSSetShaderResources(1u, 1u, normalSrv);
+
+            deviceContext->DrawIndexedInstanced(mesh.indicesCount, instanceCount, 0u, 0u, 0u);
+
+            meshIndex++;
+        }
+    }
+
     void Model::loadSamplers(ID3D11Device* const device, tinygltf::Model* const model)
     {
         // Create fallback sampler.

@@ -59,6 +59,7 @@ namespace sgfx
         void updateTransformBuffer(const math::XMMATRIX viewMatrix, ID3D11DeviceContext* const deviceContext);
 
         void render(ID3D11DeviceContext* const deviceContext) const;
+        void renderInstanced(ID3D11DeviceContext* const deviceContext, const uint32_t instanceCount) const;
 
       private:
         void loadSamplers(ID3D11Device* const device, tinygltf::Model* const model);

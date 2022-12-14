@@ -23,5 +23,10 @@ class Engine final : public sgfx::Application
     sgfx::ConstantBuffer<sgfx::SceneBuffer> m_sceneBuffer{};
 
     std::unordered_map<std::string, sgfx::Model> m_renderables{};
-    sgfx::Model m_light{};
+
+    sgfx::Model m_lightModel{};
+    sgfx::ConstantBuffer<sgfx::LightMatrix> m_lightMatricesBuffer{};
+    std::array<math::XMFLOAT4, sgfx::LIGHT_COUNT - 1u> m_lightPositions{};
+
+    float m_sunAngle{123.0f};
 };

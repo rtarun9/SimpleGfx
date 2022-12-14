@@ -15,6 +15,7 @@ constexpr bool SGFX_DEBUG = false;
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <ranges>
 
 #include <d3d11.h>
 #include <dxgi1_6.h>

@@ -20,12 +20,9 @@ cbuffer sceneBuffer : register(b0)
 {
     row_major matrix viewMatrix;
     row_major matrix viewProjectionMatrix;
-    float3 pointLightColor;
-    float padding;
-    float3 viewSpacePointLightPosition;
-    float padding2;
-    float3 cameraPosition;
-    float padding3;
+
+    float4 lightColorIntensity[5];
+    float4 viewSpaceLightPosition[5];
 };
 
 cbuffer transformBuffer : register(b1)
@@ -48,7 +45,7 @@ VSOutput VsMain(VSInput input)
 
     // Calculation of tbn matrix.
     const float3 normal = normalize(input.normal);
-    
+
     // Generate tangent from normal.
     static const float MIN_FLOAT_VALUE = 0.00001f;
 
@@ -84,7 +81,7 @@ float4 PsMain(VSOutput input) : SV_Target
     uint normalTextureHeight;
 
     normalTexture.GetDimensions(normalTextureWidth, normalTextureHeight);
-    
+
     float3 normal = normalize(input.viewSpaceNormal);
     if (normalTextureWidth != 0)
     {
@@ -96,24 +93,39 @@ float4 PsMain(VSOutput input) : SV_Target
     const float ambientStrength = 0.05f;
     const float3 ambientColor = albedoColor.xyz * ambientStrength;
 
-    // Diffuse lighting.
-    const float3 pixelToLightDirection = normalize(viewSpacePointLightPosition - input.viewSpacePixelPosition);
+    float3 result = ambientColor;
 
-    const float diffuseStrength = max(dot(pixelToLightDirection, normal), 0.0f);
-    const float3 diffuseColor = diffuseStrength * albedoColor.xyz;
+    [unroll(5)]
+    for (int i = 0; i < 5; ++i)
+    {
+        // Diffuse lighting.
+        float3 pixelToLightDirection = normalize(viewSpaceLightPosition[i].xyz - input.viewSpacePixelPosition);
+        float attenuation = 1.0f / (length(viewSpaceLightPosition[i].xyz - input.viewSpacePixelPosition));
 
-    // Specular lighting.
-    const float3 reflectionDirection = normalize(reflect(-pixelToLightDirection, normal));
-    const float specularStrength = 0.2;
+        // If Directional light.
+        if (i == 0)
+        {
+            pixelToLightDirection = normalize(viewSpaceLightPosition[i].xyz);
+            attenuation = 1.0f;
+        }
 
-    const float3 viewDirection = normalize(-input.viewSpacePixelPosition);
+        const float diffuseStrength = max(dot(pixelToLightDirection, normal), 0.0f);
+        const float3 diffuseColor = diffuseStrength * albedoColor.xyz;
 
-    const float3 halfWayVector = normalize(pixelToLightDirection + viewDirection);
+        // Specular lighting.
+        const float3 reflectionDirection = normalize(reflect(-pixelToLightDirection, normal));
+        const float specularStrength = 0.2;
 
-    const float specularIntensity = specularStrength * pow(max(dot(halfWayVector, normal), 0.0f), 64.0f);
-    const float3 specularColor = specularIntensity * albedoColor.xyz;
+        const float3 viewDirection = normalize(-input.viewSpacePixelPosition);
 
-    const float attenuation = 1.0f / (length(viewSpacePointLightPosition - input.viewSpacePixelPosition));
+        const float3 halfWayVector = normalize(pixelToLightDirection + viewDirection);
 
-    return float4(((specularColor + diffuseColor) * attenuation + ambientColor) * pointLightColor, 1.0f);
+        const float specularIntensity = specularStrength * pow(max(dot(halfWayVector, normal), 0.0f), 64.0f);
+        const float3 specularColor = specularIntensity * albedoColor.xyz;
+
+        result +=  (diffuseColor + specularColor) * attenuation * lightColorIntensity[i].xyz * lightColorIntensity[i].w;
+    }
+
+
+    return float4(result, 1.0f);
 }

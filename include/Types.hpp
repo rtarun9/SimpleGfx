@@ -26,16 +26,20 @@ namespace sgfx
         math::XMFLOAT3 biTangent{};
     };
 
+    static constexpr uint32_t LIGHT_COUNT = 5u;
+
     struct alignas(256) SceneBuffer
     {
         math::XMMATRIX viewMatrix{};
         math::XMMATRIX viewProjectionMatrix{};
-        math::XMFLOAT3 pointLightColor{1.0f, 1.0f, 1.0f};
-        float padding;
-        math::XMFLOAT3 viewSpacePointLightPosition{};
-        float padding2;
-        math::XMFLOAT3 cameraPosition{};
-        float padding3;
+
+        math::XMFLOAT4 lightColorIntensity[LIGHT_COUNT]{};
+        math::XMFLOAT4 viewSpaceLightPosition[LIGHT_COUNT]{};
+    };
+
+    struct alignas(256) LightMatrix
+    {
+        math::XMMATRIX lightModelMatrix[sgfx::LIGHT_COUNT - 1u];
     };
 
     struct InputLayoutElementDesc
@@ -61,7 +65,6 @@ namespace sgfx
     {
         wrl::ComPtr<ID3D11Buffer> buffer{};
         T data{};
-        uint8_t* mappedPointer{};
     };
 
     struct GraphicsPipelineCreationDesc

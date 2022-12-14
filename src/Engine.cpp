@@ -6,6 +6,13 @@ Engine::Engine(const std::string_view windowTitle) : sgfx::Application(windowTit
 
 void Engine::loadContent()
 {
+    m_offscreenRT = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+
+    m_offscreenSampler = createSampler(sgfx::SamplerCreationDesc{
+        .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
+        .addressMode = D3D11_TEXTURE_ADDRESS_WRAP,
+    });
+
     // Wrap the createModel functions in their own jthreads for speed. Not a very elegant solution, in the future the application class will take care of this.
 
     std::jthread cube1Thread([&]() { m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf"); });
@@ -24,14 +31,14 @@ void Engine::loadContent()
             m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb");
             m_renderables["sponza"].getTransformComponent()->scale = {0.1f, 0.1f, 0.1f};
         });
-    
-    std::jthread scifiHelmetThread(
-        [&]()
-        {
-            m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf");
-        });
-   
 
+    std::jthread scifiHelmetThread([&]() { m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf"); });
+
+    m_fullscreenPassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+        .vertexShaderPath = L"shaders/FullscreenPass.hlsl",
+        .pixelShaderPath = L"shaders/FullscreenPass.hlsl",
+        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+    });
 
     m_pipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/PhongShader.hlsl",
@@ -63,26 +70,29 @@ void Engine::loadContent()
         .vertexSize = sizeof(sgfx::ModelVertex),
     });
 
-    m_fullscreenPassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
-        .vertexShaderPath = L"shaders/FullscreenPass.hlsl",
-        .pixelShaderPath = L"shaders/FullscreenPass.hlsl",
-        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-    });
+    m_sceneBuffer = createConstantBuffer<sgfx::SceneBuffer>();
 
-    m_sceneBuffer.buffer = createBuffer<sgfx::TransformBuffer>(sgfx::BufferCreationDesc{.usage = D3D11_USAGE_DEFAULT, .bindFlags = D3D11_BIND_CONSTANT_BUFFER});
+    m_lightModel = createModel("assets/models/Cube/glTF/Cube.gltf");
 
-    m_light = createModel("assets/models/Cube/glTF/Cube.gltf");
-    m_light.getTransformComponent()->scale = {0.2f, 0.2f, 0.2f};
-    m_light.getTransformComponent()->translate = {2.2f, 2.2f, -0.5f};
+    math::XMFLOAT4 position = math::XMFLOAT4(2.2f, 2.2f, -0.5f, 1.0f);
+
+    for (const uint32_t i : std::views::iota(0u, sgfx::LIGHT_COUNT - 1u))
+    {
+        m_lightPositions[i] = {position};
+
+        position.x += 2.2f;
+        position.y += 2.2f;
+        position.z += -0.5f;
+    }
+
+    for (const uint32_t i : std::views::iota(0u, sgfx::LIGHT_COUNT))
+    {
+        m_sceneBuffer.data.lightColorIntensity[i] = {1.0f, 1.0f, 1.0f, 1.0f};
+    }
+
+    m_lightMatricesBuffer = createConstantBuffer<sgfx::LightMatrix>();
 
     m_dsv = createDepthStencilView();
-
-    m_offscreenRT = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
-
-    m_offscreenSampler = createSampler(sgfx::SamplerCreationDesc{
-        .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
-        .addressMode = D3D11_TEXTURE_ADDRESS_WRAP,
-    });
 }
 
 void Engine::update(const float deltaTime)
@@ -95,22 +105,33 @@ void Engine::update(const float deltaTime)
     m_sceneBuffer.data.viewMatrix = viewMatrix;
     m_sceneBuffer.data.viewProjectionMatrix = viewMatrix * projectionMatrix;
 
-    const math::XMVECTOR lightPosition = math::XMLoadFloat3(&m_light.getTransformComponent()->translate);
+    // Update scene buffer for non directional lights.
+    for (const uint32_t i : std::views::iota(1u, sgfx::LIGHT_COUNT))
+    {
+        const math::XMVECTOR lightPosition = math::XMLoadFloat4(&m_lightPositions[i - 1u]);
+        const math::XMVECTOR viewSpaceLightPosition = math::XMVector3TransformCoord(lightPosition, viewMatrix);
 
-    const math::XMVECTOR viewSpaceLightPosition = math::XMVector3TransformCoord(lightPosition, viewMatrix);
+        math::XMStoreFloat4(&m_sceneBuffer.data.viewSpaceLightPosition[i], viewSpaceLightPosition);
 
-    math::XMStoreFloat3(&m_sceneBuffer.data.viewSpacePointLightPosition, viewSpaceLightPosition);
+        m_lightMatricesBuffer.data.lightModelMatrix[i - 1] =
+            math::XMMatrixIdentity() * math::XMMatrixScaling(0.2f, 0.2f, 0.2f) * math::XMMatrixTranslationFromVector(lightPosition);
+    }
 
-    m_sceneBuffer.data.cameraPosition = {m_camera.m_cameraPosition.x, m_camera.m_cameraPosition.y, m_camera.m_cameraPosition.z};
+    // Update directional light.
+    {
+        const math::XMVECTOR lightPosition = math::XMVectorSet(0.0f, sin(math::XMConvertToRadians(m_sunAngle)), cos(math::XMConvertToRadians(m_sunAngle)), 0.0f);
+        const math::XMVECTOR viewSpaceLightPosition = math::XMVector4Transform(lightPosition, viewMatrix);
+
+        math::XMStoreFloat4(&m_sceneBuffer.data.viewSpaceLightPosition[0], viewSpaceLightPosition);
+    }
 
     updateConstantBuffer(m_sceneBuffer);
+    updateConstantBuffer(m_lightMatricesBuffer);
 
     for (auto& [name, renderable] : m_renderables)
     {
         renderable.updateTransformBuffer(viewMatrix, m_deviceContext.Get());
     }
-
-    m_light.updateTransformBuffer(viewMatrix, m_deviceContext.Get());
 }
 
 void Engine::render()
@@ -141,13 +162,27 @@ void Engine::render()
 
     if (ImGui::TreeNode("light properties"))
     {
-        ImGui::ColorPicker3("directional light color", &m_sceneBuffer.data.pointLightColor.x);
+        if (ImGui::TreeNode("Directional light"))
+        {
+            ImGui::SliderFloat("sun Angle", &m_sunAngle, -180.0f, 180.0f);
+            ImGui::SliderFloat3("dir light color", &m_sceneBuffer.data.lightColorIntensity[0].x, 0.0f, 1.0f);
+            ImGui::SliderFloat("dir light intensity", &m_sceneBuffer.data.lightColorIntensity[0].w, 0.0f, 30.0f);
 
-        ImGui::SliderFloat3("position", &m_light.getTransformComponent()->translate.x, -25.0f, 25.0f);
-        ImGui::SliderFloat("scale", &m_light.getTransformComponent()->scale.x, 0.1f, 10.0f);
+            ImGui::TreePop();
+        }
 
-        m_light.getTransformComponent()->scale.y = m_light.getTransformComponent()->scale.x;
-        m_light.getTransformComponent()->scale.z = m_light.getTransformComponent()->scale.x;
+        for (const uint32_t i : std::views::iota(1u, sgfx::LIGHT_COUNT))
+        {
+            if (ImGui::TreeNode((std::string("Point Light") + std::to_string(i)).c_str()))
+            {
+                ImGui::ColorPicker3("light color", &m_sceneBuffer.data.lightColorIntensity[i].x);
+                ImGui::SliderFloat("Intensity", &m_sceneBuffer.data.lightColorIntensity[i].w, 0.1f, 30.0f);
+
+                ImGui::SliderFloat3("position", &m_lightPositions[i - 1].x, -25.0f, 25.0f);
+
+                ImGui::TreePop();
+            }
+        }
 
         ImGui::TreePop();
     }
@@ -170,6 +205,7 @@ void Engine::render()
     bindPipeline(m_pipeline);
 
     ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
+    ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
 
     for (auto& [name, renderable] : m_renderables)
     {
@@ -179,9 +215,9 @@ void Engine::render()
     bindPipeline(m_lightPipeline);
 
     ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
-    ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
 
-    m_light.render(ctx.Get());
+    ctx->VSSetConstantBuffers(2u, 1u, m_lightMatricesBuffer.buffer.GetAddressOf());
+    m_lightModel.renderInstanced(ctx.Get(), sgfx::LIGHT_COUNT - 1u);
 
     // Render to swapchain backbuffer RTV.
 
