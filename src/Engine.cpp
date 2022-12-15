@@ -25,12 +25,12 @@ void Engine::loadContent()
             m_renderables["cube2"].getTransformComponent()->translate = {5.0f, 0.0f, -2.0f};
         });
 
-    std::jthread sponzaThread(
-        [&]()
-        {
-            m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb");
-            m_renderables["sponza"].getTransformComponent()->scale = {0.1f, 0.1f, 0.1f};
-        });
+     std::jthread sponzaThread(
+         [&]()
+         {
+             m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb");
+             m_renderables["sponza"].getTransformComponent()->scale = {0.1f, 0.1f, 0.1f};
+         });
 
     std::jthread scifiHelmetThread([&]() { m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf"); });
 
@@ -43,16 +43,7 @@ void Engine::loadContent()
     m_pipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/PhongShader.hlsl",
         .pixelShaderPath = L"shaders/PhongShader.hlsl",
-        .inputLayoutElements =
-            {
-                sgfx::InputLayoutElementDesc{.semanticName = "Position", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "TextureCoord", .format = DXGI_FORMAT_R32G32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "Normal", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "Tangent", .format = DXGI_FORMAT_R32G32B32A32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "BiTangent", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-            },
         .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-        .vertexSize = sizeof(sgfx::ModelVertex),
     });
 
     m_lightPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
@@ -63,8 +54,6 @@ void Engine::loadContent()
                 sgfx::InputLayoutElementDesc{.semanticName = "Position", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
                 sgfx::InputLayoutElementDesc{.semanticName = "TextureCoord", .format = DXGI_FORMAT_R32G32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
                 sgfx::InputLayoutElementDesc{.semanticName = "Normal", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "Tangent", .format = DXGI_FORMAT_R32G32B32A32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
-                sgfx::InputLayoutElementDesc{.semanticName = "BiTangent", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
             },
         .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
         .vertexSize = sizeof(sgfx::ModelVertex),
@@ -93,6 +82,25 @@ void Engine::loadContent()
     m_lightMatricesBuffer = createConstantBuffer<sgfx::LightMatrix>();
 
     m_dsv = createDepthStencilView();
+
+    m_gpassRts[0] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
+    m_gpassRts[1] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    m_gpassRts[2] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+
+    m_gpassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+        .vertexShaderPath = L"shaders/GPass.hlsl",
+        .pixelShaderPath = L"shaders/GPass.hlsl",
+        .inputLayoutElements =
+            {
+                sgfx::InputLayoutElementDesc{.semanticName = "Position", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
+                sgfx::InputLayoutElementDesc{.semanticName = "TextureCoord", .format = DXGI_FORMAT_R32G32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
+                sgfx::InputLayoutElementDesc{.semanticName = "Normal", .format = DXGI_FORMAT_R32G32B32_FLOAT, .inputClassification = D3D11_INPUT_PER_VERTEX_DATA},
+            },
+        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+        .vertexSize = sizeof(sgfx::ModelVertex),
+    });
+
+    m_gpassDsv = createDepthStencilView();
 }
 
 void Engine::update(const float deltaTime)
@@ -189,21 +197,39 @@ void Engine::render()
 
     ImGui::End();
 
+    ImGui::Begin("Albedo");
+    ImGui::Image((m_gpassRts[0].srv.Get()), {500, 500});
+    ImGui::End();
+
+    ImGui::Begin("Position");
+    ImGui::Image((m_gpassRts[1].srv.Get()), {500, 500});
+    ImGui::End();
+
+    ImGui::Begin("Normal");
+    ImGui::Image((m_gpassRts[2].srv.Get()), {500, 500});
+    ImGui::End();
+
     auto& ctx = m_deviceContext;
 
     constexpr std::array<float, 4> clearColor{0.0f, 0.0f, 0.0f, 1.0f};
 
     ctx->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
+    ctx->ClearDepthStencilView(m_gpassDsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
 
     ctx->ClearRenderTargetView(m_renderTargetView.Get(), clearColor.data());
     ctx->ClearRenderTargetView(m_offscreenRT.rtv.Get(), clearColor.data());
 
-    // Render to offscreen RT.
+    for (auto& renderTarget : m_gpassRts)
+    {
+        ctx->ClearRenderTargetView(renderTarget.rtv.Get(), clearColor.data());
+    }
+
+    // Render the Gpass.
+    const std::array<ID3D11RenderTargetView*, 3u> gpassRtvs{m_gpassRts[0].rtv.Get(), m_gpassRts[1].rtv.Get(), m_gpassRts[2].rtv.Get()};
+    ctx->OMSetRenderTargets(3u, gpassRtvs.data(), m_gpassDsv.Get());
     ctx->RSSetViewports(1u, &m_viewport);
-    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), m_dsv.Get());
 
-    bindPipeline(m_pipeline);
-
+    bindPipeline(m_gpassPipeline);
     ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
     ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
 
@@ -211,6 +237,23 @@ void Engine::render()
     {
         renderable.render(ctx.Get());
     }
+
+    // Shading pass.
+    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), nullptr);
+
+    bindPipeline(m_pipeline);
+
+    const std::array<ID3D11ShaderResourceView*, 3u> lightingPassSrvs{m_gpassRts[0].srv.Get(), m_gpassRts[1].srv.Get(), m_gpassRts[2].srv.Get()};
+
+    ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
+    ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
+
+    ctx->PSSetShaderResources(0u, 3u, lightingPassSrvs.data());
+    ctx->Draw(3u, 0u);
+
+
+    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), m_gpassDsv.Get());
+    ctx->RSSetViewports(1u, &m_viewport);
 
     bindPipeline(m_lightPipeline);
 
@@ -230,8 +273,8 @@ void Engine::render()
 
     ctx->Draw(3u, 0u);
 
-    wrl::ComPtr<ID3D11ShaderResourceView> nullSrv{nullptr};
-    ctx->PSSetShaderResources(0u, 1u, nullSrv.GetAddressOf());
+    std::array<ID3D11ShaderResourceView*, 3> nullSrvs{nullptr, nullptr, nullptr};
+    ctx->PSSetShaderResources(0u, 3u, nullSrvs.data());
 
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

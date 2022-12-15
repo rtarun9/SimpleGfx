@@ -22,8 +22,6 @@ namespace sgfx
         math::XMFLOAT3 position{};
         math::XMFLOAT2 textureCoord{};
         math::XMFLOAT3 normal{};
-        math::XMFLOAT4 tangent{};
-        math::XMFLOAT3 biTangent{};
     };
 
     static constexpr uint32_t LIGHT_COUNT = 5u;

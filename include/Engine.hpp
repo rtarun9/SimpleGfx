@@ -28,5 +28,9 @@ class Engine final : public sgfx::Application
     sgfx::ConstantBuffer<sgfx::LightMatrix> m_lightMatricesBuffer{};
     std::array<math::XMFLOAT4, sgfx::LIGHT_COUNT - 1u> m_lightPositions{};
 
+    std::array<sgfx::RenderTarget, 3> m_gpassRts{};
+    sgfx::GraphicsPipeline m_gpassPipeline{};
+    comptr<ID3D11DepthStencilView> m_gpassDsv{};
+
     float m_sunAngle{123.0f};
 };

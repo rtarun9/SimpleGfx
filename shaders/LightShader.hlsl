@@ -3,8 +3,6 @@ struct VSInput
     float3 position : POSITION;
     float2 textureCoord : TEXTURECOORD;
     float3 normal : NORMAL;
-    float4 tangent : TANGENT;
-    float3 biTangent : BITANGENT;
 };
 
 struct VSOutput

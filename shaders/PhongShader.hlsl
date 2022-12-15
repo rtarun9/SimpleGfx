@@ -1,19 +1,7 @@
-struct VSInput
-{
-    float3 position : POSITION;
-    float2 textureCoord : TEXTURECOORD;
-    float3 normal : NORMAL;
-    float4 tangent : TANGENT;
-    float3 biTangent : BITANGENT;
-};
-
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 textureCoord : TEX_COORD;
-    float3 viewSpaceNormal : NORMAL;
-    float3 viewSpacePixelPosition : VIEW_SPACE_PIXEL_COORD;
-    float3x3 tbnMatrix : TBN_MATRIX;
+    float2 textureCoord : Texture_Coord;
 };
 
 cbuffer sceneBuffer : register(b0)
@@ -32,62 +20,33 @@ cbuffer transformBuffer : register(b1)
     row_major matrix inverseModelViewMatrix;
 };
 
-VSOutput VsMain(VSInput input)
+
+VSOutput VsMain(uint vertexID : SV_VertexID)
 {
+    static const float3 VERTEX_POSITIONS[3] = {float3(-1.0f, 1.0f, 0.0f), float3(3.0f, 1.0f, 0.0f), float3(-1.0f, -3.0f, 0.0f)};
+
     VSOutput output;
-    output.position = mul(mul(float4(input.position, 1.0f), modelMatrix), viewProjectionMatrix);
-    output.textureCoord = input.textureCoord;
-
-    const float3x3 transposedInverseModelViewMatrix = (float3x3)transpose(inverseModelViewMatrix);
-    output.viewSpaceNormal = normalize(mul(input.normal, transposedInverseModelViewMatrix));
-
-    output.viewSpacePixelPosition = mul(float4(input.position, 1.0f), mul(modelMatrix, viewMatrix)).xyz;
-
-    // Calculation of tbn matrix.
-    const float3 normal = normalize(input.normal);
-
-    // Generate tangent from normal.
-    static const float MIN_FLOAT_VALUE = 0.00001f;
-
-    float3 tangent = cross(normal, float3(0.0f, 1.0f, 0.0f));
-    tangent = normalize(lerp(cross(normal, float3(1.0f, 0.0f, 0.0f)), tangent, step(MIN_FLOAT_VALUE, dot(tangent, tangent))));
-
-    const float3 biTangent = normalize(cross(normal, tangent));
-
-    const float3 t = normalize(mul(tangent, transposedInverseModelViewMatrix));
-    const float3 b = normalize(mul(biTangent, transposedInverseModelViewMatrix));
-    const float3 n = normalize(mul(normal, transposedInverseModelViewMatrix));
-
-    output.tbnMatrix = float3x3(t, b, n);
-
+    output.position = float4(VERTEX_POSITIONS[vertexID], 1.0f);
+    output.textureCoord = output.position * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
     return output;
 }
 
 Texture2D<float4> albedoTexture : register(t0);
-SamplerState albedoTextureSampler : register(s0);
+Texture2D<float4> positionTexture : register(t1);
+Texture2D<float4> normalTexture : register(t2);
 
-Texture2D<float4> normalTexture : register(t1);
-SamplerState normalTextureSampler : register(s1);
+SamplerState wrapSampler : register(s0);
 
 float4 PsMain(VSOutput input) : SV_Target
 {
-    float4 albedoColor = albedoTexture.Sample(albedoTextureSampler, input.textureCoord);
+    float4 albedoColor = albedoTexture.Sample(wrapSampler, input.textureCoord);
     if (albedoColor.a < 0.2f)
     {
         discard;
     }
 
-    uint normalTextureWidth;
-    uint normalTextureHeight;
-
-    normalTexture.GetDimensions(normalTextureWidth, normalTextureHeight);
-
-    float3 normal = normalize(input.viewSpaceNormal);
-    if (normalTextureWidth != 0)
-    {
-        normal = 2.0f * normalTexture.Sample(normalTextureSampler, input.textureCoord).xyz - float3(1.0f, 1.0f, 1.0f);
-        normal = normalize(mul(normal, input.tbnMatrix));
-    }
+    float3 normal = normalTexture.Sample(wrapSampler, input.textureCoord).xyz;
+    float3 viewSpacePixelPosition = positionTexture.Sample(wrapSampler, input.textureCoord).xyz;
 
     // Ambient lighting.
     const float ambientStrength = 0.05f;
@@ -99,8 +58,8 @@ float4 PsMain(VSOutput input) : SV_Target
     for (int i = 0; i < 5; ++i)
     {
         // Diffuse lighting.
-        float3 pixelToLightDirection = normalize(viewSpaceLightPosition[i].xyz - input.viewSpacePixelPosition);
-        float attenuation = 1.0f / (length(viewSpaceLightPosition[i].xyz - input.viewSpacePixelPosition));
+        float3 pixelToLightDirection = normalize(viewSpaceLightPosition[i].xyz - viewSpacePixelPosition);
+        float attenuation = 1.0f / (length(viewSpaceLightPosition[i].xyz - viewSpacePixelPosition));
 
         // If Directional light.
         if (i == 0)
@@ -116,7 +75,7 @@ float4 PsMain(VSOutput input) : SV_Target
         const float3 reflectionDirection = normalize(reflect(-pixelToLightDirection, normal));
         const float specularStrength = 0.2;
 
-        const float3 viewDirection = normalize(-input.viewSpacePixelPosition);
+        const float3 viewDirection = normalize(-viewSpacePixelPosition);
 
         const float3 halfWayVector = normalize(pixelToLightDirection + viewDirection);
 

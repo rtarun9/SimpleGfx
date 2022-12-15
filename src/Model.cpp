@@ -495,15 +495,6 @@ namespace sgfx
         {
             Mesh mesh{};
 
-            struct ModelVertex
-            {
-                math::XMFLOAT3 position{};
-                math::XMFLOAT2 textureCoord{};
-                math::XMFLOAT3 normal{};
-                math::XMFLOAT4 tangent{};
-                math::XMFLOAT3 biTangent{};
-            };
-
             std::vector<ModelVertex> vertices{};
 
             std::vector<uint32_t> indices{};
@@ -562,36 +553,6 @@ namespace sgfx
                     (reinterpret_cast<float const*>(normals + (i * normalByteStride)))[1],
                     (reinterpret_cast<float const*>(normals + (i * normalByteStride)))[2],
                 };
-
-                // Required as a model need not have tangents.
-                if (tangentAccesor.bufferView)
-                {
-                    modelVertex.tangent = {
-                        (reinterpret_cast<float const*>(tangents + (i * tangentByteStride)))[0],
-                        (reinterpret_cast<float const*>(tangents + (i * tangentByteStride)))[1],
-                        (reinterpret_cast<float const*>(tangents + (i * tangentByteStride)))[2],
-                        (reinterpret_cast<float const*>(tangents + (i * tangentByteStride)))[3],
-                    };
-                }
-                else
-                {
-                    // note(rtarun9) : This code works, but looks very pixelated in shaders. Utils.hlsli calculates tangents instead.
-                    math::XMVECTOR normalVector = math::XMLoadFloat3(&modelVertex.normal);
-                    math::XMVECTOR tangentVector = math::XMVector3Cross(normalVector, math::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
-                    tangentVector = math::XMVectorLerp(math::XMVector3Cross(normalVector, math::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f)),
-                                                       tangentVector,
-                                                       math::XMVectorGetX(math::XMVector3Dot(tangentVector, tangentVector)));
-                    tangentVector = math::XMVector3Normalize(tangentVector);
-                    math::XMFLOAT3 tangent3Vector{};
-                    math::XMStoreFloat3(&tangent3Vector, tangentVector);
-                    modelVertex.tangent = {tangent3Vector.x, tangent3Vector.y, tangent3Vector.z, 1.0f};
-                }
-
-                // Calculate tangent.
-                // tangent.z is just a constant (-1 or 1) to indicate the handedness.
-                math::XMFLOAT3 tangent3Vector = {modelVertex.tangent.x, modelVertex.tangent.y, modelVertex.tangent.z};
-                math::XMVECTOR biTangentVector = math::XMVectorScale(math::XMVector3Cross(XMLoadFloat3(&modelVertex.normal), XMLoadFloat3(&tangent3Vector)), modelVertex.tangent.z);
-                math::XMStoreFloat3(&modelVertex.biTangent, biTangentVector);
 
                 vertices.emplace_back(modelVertex);
             }
