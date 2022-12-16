@@ -12,9 +12,10 @@ class Engine final : public sgfx::Application
     void render() override;
 
   private:
-    comptr<ID3D11DepthStencilView> m_dsv{};
+    sgfx::DepthTexture m_depthTexture{};
     sgfx::RenderTarget m_offscreenRT{};
     comptr<ID3D11SamplerState> m_offscreenSampler{};
+    comptr<ID3D11SamplerState> m_wrapSampler{};
 
     sgfx::GraphicsPipeline m_pipeline{};
     sgfx::GraphicsPipeline m_lightPipeline{};
@@ -30,7 +31,14 @@ class Engine final : public sgfx::Application
 
     std::array<sgfx::RenderTarget, 3> m_gpassRts{};
     sgfx::GraphicsPipeline m_gpassPipeline{};
-    comptr<ID3D11DepthStencilView> m_gpassDsv{};
+    sgfx::DepthTexture m_gpassDepthTexture{};
+
+    comptr<ID3D11ShaderResourceView> m_ssaoRandomRotationTexture{};
+    sgfx::GraphicsPipeline m_ssaoPipeline{};
+    sgfx::GraphicsPipeline m_boxBlurPipeline{};
+    sgfx::RenderTarget m_ssaoRt{};
+    sgfx::RenderTarget m_ssaoBlurredRt{};
+    sgfx::ConstantBuffer<sgfx::SSAOBuffer> m_ssaoBuffer{};
 
     float m_sunAngle{123.0f};
 };

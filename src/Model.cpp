@@ -11,15 +11,17 @@
 #define JSON_NOEXCEPTION
 #define TINYGLTF_NO_INCLUDE_STB_IMAGE
 #define TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE
-#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NO_EXTERNAL_IMAGE
 #define TINYGLTF_USE_CPP14
+#define TINYGLTF_IMPLEMENTATION
 #include <tiny_gltf.h>
 
 #include <DirectXTex.h>
 
 namespace sgfx
 {
-    Model::Model(ID3D11Device* const device, ID3D11ShaderResourceView* const fallbackSrv, const std::string_view modelPath) : m_modelPath(modelPath), m_fallbackSrv(fallbackSrv)
+    Model::Model(ID3D11Device* const device, ID3D11ShaderResourceView* const fallbackSrv, const std::string_view modelPath, const TransformComponent& transformData)
+        : m_modelPath(modelPath), m_fallbackSrv(fallbackSrv), m_transformComponent(transformData)
     {
         // Create the transform buffer.
         const D3D11_BUFFER_DESC bufferDesc = {
@@ -28,7 +30,9 @@ namespace sgfx
             .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
         };
 
-        throwIfFailed(device->CreateBuffer(&bufferDesc, nullptr, &m_transformBuffer.buffer));
+        const D3D11_SUBRESOURCE_DATA subresourceData = {.pSysMem = &transformData};
+
+        throwIfFailed(device->CreateBuffer(&bufferDesc, &subresourceData, &m_transformBuffer.buffer));
 
         std::string modelDirectoryPathStr{};
 
@@ -75,11 +79,14 @@ namespace sgfx
             }
         }
 
-        std::thread samplerThread([&]() { // Load samplers.
-            loadSamplers(device, &model);
-        });
+        std::thread samplerThread(
+            [&]()
+            {
+                // Load samplers.
+                loadSamplers(device, &model);
+            });
 
-        std::thread materialThread( // Load materials.
+        std::thread materialThread(
             [&]()
             {
                 // Load textures and materials.
@@ -88,12 +95,15 @@ namespace sgfx
 
         tinygltf::Scene& scene = model.scenes[model.defaultScene];
 
-        std::thread meshThread([&]() { // Build meshes.
-            for (const int& nodeIndex : scene.nodes)
+        std::thread meshThread(
+            [&]()
             {
-                loadNode(device, nodeIndex, &model);
-            }
-        });
+                // Build meshes.
+                for (const int& nodeIndex : scene.nodes)
+                {
+                    loadNode(device, nodeIndex, &model);
+                }
+            });
 
         samplerThread.join();
         materialThread.join();
@@ -156,7 +166,7 @@ namespace sgfx
         }
     }
 
-    void Model::renderInstanced(ID3D11DeviceContext* const deviceContext, const uint32_t instanceCount) const 
+    void Model::renderInstanced(ID3D11DeviceContext* const deviceContext, const uint32_t instanceCount) const
     {
         deviceContext->VSSetConstantBuffers(1u, 1u, m_transformBuffer.buffer.GetAddressOf());
         uint32_t meshIndex = 0u;
@@ -365,8 +375,6 @@ namespace sgfx
 
             const DirectX::WIC_FLAGS wicFlag = isSrgb == true ? DirectX::WIC_FLAGS_DEFAULT_SRGB : DirectX::WIC_FLAGS_IGNORE_SRGB;
 
-            const std::lock_guard<std::mutex> lock(textureCreationMutex);
-
             if (FAILED(DirectX::LoadFromWICFile(texturePath.data(), wicFlag, &metaData, scratchImage)))
             {
                 std::wcout << L"Failed to load texture from path : " << texturePath << L'\n';
@@ -375,6 +383,8 @@ namespace sgfx
 
             DirectX::ScratchImage mipChain{};
             throwIfFailed(DirectX::GenerateMipMaps(scratchImage.GetImages(), scratchImage.GetImageCount(), metaData, DirectX::TEX_FILTER_DEFAULT, 0u, mipChain));
+
+            const std::lock_guard<std::mutex> lock(textureCreationMutex);
 
             wrl::ComPtr<ID3D11Resource> texture{};
             throwIfFailed(DirectX::CreateTexture(device, mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), &texture));

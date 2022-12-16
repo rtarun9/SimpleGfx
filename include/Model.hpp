@@ -52,7 +52,7 @@ namespace sgfx
     {
       public:
         Model() = default;
-        Model(ID3D11Device* const device, ID3D11ShaderResourceView* const fallbackSrv, const std::string_view modelPath);
+        Model(ID3D11Device* const device, ID3D11ShaderResourceView* const fallbackSrv, const std::string_view modelPath, const TransformComponent& transformData = {});
 
         TransformComponent* getTransformComponent() { return &m_transformComponent; }
 

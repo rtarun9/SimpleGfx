@@ -2,6 +2,8 @@
 
 #include "Engine.hpp"
 
+using namespace math;
+
 Engine::Engine(const std::string_view windowTitle) : sgfx::Application(windowTitle) {}
 
 void Engine::loadContent()
@@ -10,29 +12,24 @@ void Engine::loadContent()
 
     m_offscreenSampler = createSampler(sgfx::SamplerCreationDesc{
         .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
+        .addressMode = D3D11_TEXTURE_ADDRESS_CLAMP,
+    });
+
+     m_wrapSampler = createSampler(sgfx::SamplerCreationDesc{
+        .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
         .addressMode = D3D11_TEXTURE_ADDRESS_WRAP,
     });
 
-    // Wrap the createModel functions in their own jthreads for speed. Not a very elegant solution, in the future the application class will take care of this.
+    m_ssaoRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32_FLOAT);
+    m_ssaoBlurredRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32_FLOAT);
 
-    std::jthread cube1Thread([&]() { m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf"); });
+    m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf");
 
-    std::jthread cube2Thread(
-        [&]()
-        {
-            m_renderables["cube2"] = createModel("assets/models/Cube/glTF/Cube.gltf");
+    m_renderables["cube2"] = createModel("assets/models/Cube/glTF/Cube.gltf", sgfx::TransformComponent{.translate = {5.0f, 0.0f, -2.0f}});
 
-            m_renderables["cube2"].getTransformComponent()->translate = {5.0f, 0.0f, -2.0f};
-        });
+    m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb", sgfx::TransformComponent{.scale = {0.1f, 0.1f, 0.1f}});
 
-     std::jthread sponzaThread(
-         [&]()
-         {
-             m_renderables["sponza"] = createModel("assets/models/sponza-gltf-pbr/sponza.glb");
-             m_renderables["sponza"].getTransformComponent()->scale = {0.1f, 0.1f, 0.1f};
-         });
-
-    std::jthread scifiHelmetThread([&]() { m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf"); });
+    m_renderables["scifi-helmet"] = createModel("assets/models/SciFiHelmet/glTF/SciFiHelmet.gltf");
 
     m_fullscreenPassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/FullscreenPass.hlsl",
@@ -44,6 +41,20 @@ void Engine::loadContent()
         .vertexShaderPath = L"shaders/PhongShader.hlsl",
         .pixelShaderPath = L"shaders/PhongShader.hlsl",
         .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+    });
+
+    m_ssaoPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+        .vertexShaderPath = L"shaders/SSAO.hlsl",
+        .pixelShaderPath = L"shaders/SSAO.hlsl",
+        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+
+    });
+
+     m_boxBlurPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+        .vertexShaderPath = L"shaders/BoxBlur.hlsl",
+        .pixelShaderPath = L"shaders/BoxBlur.hlsl",
+        .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+
     });
 
     m_lightPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
@@ -81,7 +92,7 @@ void Engine::loadContent()
 
     m_lightMatricesBuffer = createConstantBuffer<sgfx::LightMatrix>();
 
-    m_dsv = createDepthStencilView();
+    m_gpassDepthTexture = createDepthTexture();
 
     m_gpassRts[0] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
     m_gpassRts[1] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -100,7 +111,49 @@ void Engine::loadContent()
         .vertexSize = sizeof(sgfx::ModelVertex),
     });
 
-    m_gpassDsv = createDepthStencilView();
+    m_gpassDepthTexture = createDepthTexture();
+
+    m_depthTexture = createDepthTexture();
+
+    // Setup data from SSAO pass.
+    m_ssaoBuffer = createConstantBuffer<sgfx::SSAOBuffer>();
+    
+    std::uniform_real_distribution<float> randomUnitFloatDistribution{0.0f, 1.0f};
+    std::default_random_engine generator{};
+
+    // Randomly generator kernel vectors in Tangent space (i.e the vector points in the +ve Z direction).
+    // X and Y components are in range [-1, 1], Z component is in range [0, 1].
+    for (const uint32_t i : std::views::iota(0u, 64u))
+    {
+        const math::XMVECTOR randomVector = math::XMVectorSet(randomUnitFloatDistribution(generator) * 2.0f - 1.0f,
+                                                              randomUnitFloatDistribution(generator) * 2.0f - 1.0f,
+                                                              randomUnitFloatDistribution(generator),
+                                                              0.0f);
+
+        // After normalization, the vector has unit length, i.e it lies on the surface of the hemisphere oriented along the +z axis.
+        const math::XMVECTOR normalizedRandomVector = math::XMVector3Normalize(randomVector);
+
+        // Scaling the sample point so the points lie within the hemisphere.
+        const math::XMVECTOR randomlyDistributedSamplePoint = randomUnitFloatDistribution(generator) * normalizedRandomVector;
+
+        // We want more sample points generated near the origin and fewer points as the distance from origin increases. 
+        // This is done because we want to give more weight / priority to occlusions happening close to the actual fragment.
+
+        const float scaleFactor = static_cast<float>(i) / 64.0f;
+        const float scale = std::lerp<float, float>(0.1f, 1.0f, scaleFactor * scaleFactor);
+
+        math::XMStoreFloat4(&m_ssaoBuffer.data.sampleVectors[i], scale * randomlyDistributedSamplePoint);
+    }
+
+    // Generate the noise kernel.
+    // Contents are used to randomly rotate the kernel vectors.
+    std::array<math::XMFLOAT2, 16> noiseTextureData{};
+    for (const uint32_t i : std::views::iota(0u, 16u))
+    {
+        noiseTextureData[i] = math::XMFLOAT2{randomUnitFloatDistribution(generator) * 2.0f - 1.0f, randomUnitFloatDistribution(generator) * 2.0f - 1.0f};
+    }
+
+    m_ssaoRandomRotationTexture = createTexture<math::XMFLOAT2>(noiseTextureData, 4u, 4u, DXGI_FORMAT_R32G32_FLOAT);
 }
 
 void Engine::update(const float deltaTime)
@@ -112,6 +165,8 @@ void Engine::update(const float deltaTime)
 
     m_sceneBuffer.data.viewMatrix = viewMatrix;
     m_sceneBuffer.data.viewProjectionMatrix = viewMatrix * projectionMatrix;
+
+    m_ssaoBuffer.data.projectionMatrix = projectionMatrix;
 
     // Update scene buffer for non directional lights.
     for (const uint32_t i : std::views::iota(1u, sgfx::LIGHT_COUNT))
@@ -135,6 +190,7 @@ void Engine::update(const float deltaTime)
 
     updateConstantBuffer(m_sceneBuffer);
     updateConstantBuffer(m_lightMatricesBuffer);
+    updateConstantBuffer(m_ssaoBuffer);
 
     for (auto& [name, renderable] : m_renderables)
     {
@@ -152,6 +208,9 @@ void Engine::render()
     ImGui::Begin("Scene menu");
     ImGui::SliderFloat("camera mvmt speed", &m_camera.m_movementSpeed, 0.1f, 50.0f);
     ImGui::SliderFloat("camera rotation speed", &m_camera.m_rotationSpeed, 0.1f, 3.0f);
+
+    ImGui::SliderFloat("ssao radius", &m_ssaoBuffer.data.radius, 0.0f, 10.0f);
+    ImGui::SliderFloat("ssao bias", &m_ssaoBuffer.data.bias, 0.0f, 10.0f);
 
     for (auto& [name, renderable] : m_renderables)
     {
@@ -197,36 +256,35 @@ void Engine::render()
 
     ImGui::End();
 
-    ImGui::Begin("Albedo");
-    ImGui::Image((m_gpassRts[0].srv.Get()), {500, 500});
+    ImGui::Begin("SSAO RT");
+    ImGui::Image(m_ssaoRt.srv.Get(), {300, 300});
     ImGui::End();
 
-    ImGui::Begin("Position");
-    ImGui::Image((m_gpassRts[1].srv.Get()), {500, 500});
-    ImGui::End();
-
-    ImGui::Begin("Normal");
-    ImGui::Image((m_gpassRts[2].srv.Get()), {500, 500});
+    ImGui::Begin("SSAO Blurred RT");
+    ImGui::Image(m_ssaoBlurredRt.srv.Get(), {300, 300});
     ImGui::End();
 
     auto& ctx = m_deviceContext;
 
     constexpr std::array<float, 4> clearColor{0.0f, 0.0f, 0.0f, 1.0f};
 
-    ctx->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
-    ctx->ClearDepthStencilView(m_gpassDsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
+    ctx->ClearDepthStencilView(m_depthTexture.dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
+    ctx->ClearDepthStencilView(m_gpassDepthTexture.dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 1u);
 
     ctx->ClearRenderTargetView(m_renderTargetView.Get(), clearColor.data());
-    ctx->ClearRenderTargetView(m_offscreenRT.rtv.Get(), clearColor.data());
+    ctx->ClearRenderTargetView(m_renderTargetView.Get(), clearColor.data());
+    ctx->ClearRenderTargetView(m_ssaoRt.rtv.Get(), clearColor.data());
 
+        std::array<ID3D11ShaderResourceView*, 4> nullSrvs{nullptr, nullptr, nullptr, nullptr};
+    
     for (auto& renderTarget : m_gpassRts)
     {
         ctx->ClearRenderTargetView(renderTarget.rtv.Get(), clearColor.data());
     }
 
-    // Render the Gpass.
+    // Render the Geometry pass.
     const std::array<ID3D11RenderTargetView*, 3u> gpassRtvs{m_gpassRts[0].rtv.Get(), m_gpassRts[1].rtv.Get(), m_gpassRts[2].rtv.Get()};
-    ctx->OMSetRenderTargets(3u, gpassRtvs.data(), m_gpassDsv.Get());
+    ctx->OMSetRenderTargets(3u, gpassRtvs.data(), m_gpassDepthTexture.dsv.Get());
     ctx->RSSetViewports(1u, &m_viewport);
 
     bindPipeline(m_gpassPipeline);
@@ -238,21 +296,49 @@ void Engine::render()
         renderable.render(ctx.Get());
     }
 
+    // SSAO pass.
+    ctx->OMSetRenderTargets(1u, m_ssaoRt.rtv.GetAddressOf(), nullptr);
+    bindPipeline(m_ssaoPipeline);
+
+    ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
+    ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
+    ctx->PSSetConstantBuffers(1u, 1u, m_ssaoBuffer.buffer.GetAddressOf());
+    ctx->PSSetSamplers(0u, 1u, m_offscreenSampler.GetAddressOf());
+    ctx->PSSetSamplers(1u, 1u, m_wrapSampler.GetAddressOf());
+
+    const std::array<ID3D11ShaderResourceView* const, 4u> ssaoShaderTextures{m_ssaoRandomRotationTexture.Get(),
+                                                                             m_gpassRts[1].srv.Get(),
+                                                                             m_gpassRts[2].srv.Get(),
+                                                                             m_gpassDepthTexture.srv.Get()};
+
+    ctx->PSSetShaderResources(0u, 4u, ssaoShaderTextures.data());
+
+    ctx->Draw(3u, 0u);
+
+    // Apply box blur filter on SSAO texture.
+
+    ctx->OMSetRenderTargets(1u, m_ssaoBlurredRt.rtv.GetAddressOf(), nullptr);
+    bindPipeline(m_boxBlurPipeline);
+
+    ctx->PSSetShaderResources(0u, 1u, nullSrvs.data());
+
+    ctx->PSSetShaderResources(0u, 1u, m_ssaoRt.srv.GetAddressOf());
+    ctx->Draw(3u, 0u);
+
     // Shading pass.
     ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), nullptr);
 
     bindPipeline(m_pipeline);
 
-    const std::array<ID3D11ShaderResourceView*, 3u> lightingPassSrvs{m_gpassRts[0].srv.Get(), m_gpassRts[1].srv.Get(), m_gpassRts[2].srv.Get()};
+    const std::array<ID3D11ShaderResourceView*, 4u> lightingPassSrvs{m_gpassRts[0].srv.Get(), m_gpassRts[1].srv.Get(), m_gpassRts[2].srv.Get(), m_ssaoBlurredRt.srv.Get()};
 
     ctx->VSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
     ctx->PSSetConstantBuffers(0u, 1u, m_sceneBuffer.buffer.GetAddressOf());
 
-    ctx->PSSetShaderResources(0u, 3u, lightingPassSrvs.data());
+    ctx->PSSetShaderResources(0u, 4u, lightingPassSrvs.data());
     ctx->Draw(3u, 0u);
 
-
-    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), m_gpassDsv.Get());
+    ctx->OMSetRenderTargets(1u, m_offscreenRT.rtv.GetAddressOf(), m_gpassDepthTexture.dsv.Get());
     ctx->RSSetViewports(1u, &m_viewport);
 
     bindPipeline(m_lightPipeline);
@@ -273,8 +359,8 @@ void Engine::render()
 
     ctx->Draw(3u, 0u);
 
-    std::array<ID3D11ShaderResourceView*, 3> nullSrvs{nullptr, nullptr, nullptr};
-    ctx->PSSetShaderResources(0u, 3u, nullSrvs.data());
+
+    ctx->PSSetShaderResources(0u, 4u, nullSrvs.data());
 
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

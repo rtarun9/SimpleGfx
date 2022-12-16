@@ -94,4 +94,20 @@ namespace sgfx
         wrl::ComPtr<ID3D11RenderTargetView> rtv{};
         wrl::ComPtr<ID3D11ShaderResourceView> srv{};
     };
+
+    struct DepthTexture
+    {
+        wrl::ComPtr<ID3D11DepthStencilView> dsv{};
+        wrl::ComPtr<ID3D11ShaderResourceView> srv{};
+    };
+
+    struct alignas(256) SSAOBuffer
+    {
+        math::XMMATRIX projectionMatrix{};
+        math::XMFLOAT4  sampleVectors[64];
+        float radius{0.55f};
+        float bias{0.025f};
+
+        math::XMFLOAT2 padding{};
+    };
 }

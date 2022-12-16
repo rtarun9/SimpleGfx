@@ -408,14 +408,15 @@ namespace sgfx
         return renderTarget;
     }
 
-    Model Application::createModel(const std::string_view modelPath)
+    Model Application::createModel(const std::string_view modelPath, const sgfx::TransformComponent& transformData)
     {
-        Model model(m_device.Get(), m_fallbackTexture.Get(), modelPath);
+        Model model(m_device.Get(), m_fallbackTexture.Get(), modelPath, transformData);
         return model;
     }
-    wrl::ComPtr<ID3D11DepthStencilView> Application::createDepthStencilView()
+
+    DepthTexture Application::createDepthTexture()
     {
-        comptr<ID3D11DepthStencilView> dsv{};
+        DepthTexture depthTexture{};
 
         comptr<ID3D11Texture2D> depthBuffer{};
 
@@ -424,15 +425,36 @@ namespace sgfx
             .Height = m_windowHeight,
             .MipLevels = 1u,
             .ArraySize = 1u,
-            .Format = DXGI_FORMAT_D32_FLOAT,
+            .Format = DXGI_FORMAT_R32_TYPELESS,
             .SampleDesc = {1u, 0u},
             .Usage = D3D11_USAGE_DEFAULT,
-            .BindFlags = D3D11_BIND_DEPTH_STENCIL,
+            .BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE,
+        };
+
+        const D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D,
+            .Texture2D =
+                {
+                    .MipSlice = 0u,
+                },
         };
 
         throwIfFailed(m_device->CreateTexture2D(&depthStencilBufferDesc, nullptr, &depthBuffer));
-        throwIfFailed(m_device->CreateDepthStencilView(depthBuffer.Get(), nullptr, &dsv));
+        throwIfFailed(m_device->CreateDepthStencilView(depthBuffer.Get(), &dsvDesc, &depthTexture.dsv));
 
-        return dsv;
+        const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+            .Format = DXGI_FORMAT_R32_FLOAT,
+            .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+            .Texture2D =
+                {
+                    .MostDetailedMip = 0u,
+                    .MipLevels = 1u,
+                },
+        };
+
+        throwIfFailed(m_device->CreateShaderResourceView(depthBuffer.Get(), &srvDesc, &depthTexture.srv));
+
+        return depthTexture;
     }
 }

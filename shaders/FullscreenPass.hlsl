@@ -17,7 +17,7 @@ VSOutput VsMain(uint vertexID : SV_VertexID)
 Texture2D<float4> tex : register(t0);
 SamplerState wrapSampler : register(s0);
 
-float3 AcesNarkowicz(const float3 color)
+float3 AcesNarkowiczAndGammaCorrection(const float3 color)
 { // Aces tone mapping approximation : Narkowicz ACES model.
   // Reference : https://64.github.io/tonemapping/#aces
 
@@ -28,17 +28,16 @@ float3 AcesNarkowicz(const float3 color)
     const float d = 0.59f;
     const float e = 0.14f;
     
-    return float3(clamp((toneMappedColor.r * (a * toneMappedColor.r + b)) / (toneMappedColor.r * (c * toneMappedColor.r + d) + e), 0.0f, 1.0f),
-                  clamp((toneMappedColor.g * (a * toneMappedColor.g + b)) / (toneMappedColor.g * (c * toneMappedColor.g + d) + e), 0.0f, 1.0f),
-                  clamp((toneMappedColor.b * (a * toneMappedColor.b + b)) / (toneMappedColor.b * (c * toneMappedColor.b + d) + e), 0.0f, 1.0f));
+    toneMappedColor = (toneMappedColor * (a * toneMappedColor + b)) / (toneMappedColor * (c * toneMappedColor + d) + e);
+    toneMappedColor = pow(toneMappedColor, 1.0f/2.2f);
+    return clamp(toneMappedColor, 0.0f, 1.0f);
 }
 
 float4 PsMain(VSOutput input) : SV_Target
 {
     float3 color = tex.Sample(wrapSampler, input.textureCoord).xyz;
 
-    color = AcesNarkowicz(color);
+    color = AcesNarkowiczAndGammaCorrection(color);
 
-    // Apply gamma correction and return result.
-    return float4(pow(color.rgb, 1 / 2.2f), 1.0f);
+    return float4(color, 1.0f);
 }

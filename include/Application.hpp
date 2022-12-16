@@ -40,13 +40,14 @@ namespace sgfx
         [[nodiscard]] GraphicsPipeline createGraphicsPipeline(const GraphicsPipelineCreationDesc& pipelineCreationDesc);
 
         [[nodiscard]] wrl::ComPtr<ID3D11ShaderResourceView> createTexture(const std::wstring_view texturePath);
+        template <typename T> [[nodiscard]] wrl::ComPtr<ID3D11ShaderResourceView> createTexture(const std::span<const T> data, const uint32_t width, const uint32_t height, const DXGI_FORMAT format);
         [[nodiscard]] wrl::ComPtr<ID3D11SamplerState> createSampler(const SamplerCreationDesc& samplerCreationDesc);
 
         [[nodiscard]] RenderTarget createRenderTarget(const uint32_t width, const uint32_t height, const DXGI_FORMAT format);
 
-        [[nodiscard]] Model createModel(const std::string_view modelPath);
+        [[nodiscard]] Model createModel(const std::string_view modelPath, const sgfx::TransformComponent& transformData = {});
 
-        [[nodiscard]] wrl::ComPtr<ID3D11DepthStencilView> createDepthStencilView();
+        [[nodiscard]] DepthTexture createDepthTexture();
 
         template <typename T> [[nodiscard]] wrl::ComPtr<ID3D11Buffer> createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data = {});
         template <typename T> [[nodiscard]] ConstantBuffer<T> createConstantBuffer();
@@ -85,6 +86,48 @@ namespace sgfx
     template <typename T> inline void Application::updateConstantBuffer(ConstantBuffer<T>& buffer) const
     {
         m_deviceContext->UpdateSubresource(buffer.buffer.Get(), 0u, nullptr, &buffer.data, 0u, 0u);
+    }
+
+    template <typename T>
+    inline wrl::ComPtr<ID3D11ShaderResourceView> Application::createTexture(const std::span<const T> data, const uint32_t width, const uint32_t height, const DXGI_FORMAT format)
+    {
+        comptr<ID3D11Texture2D> texture{};
+        comptr<ID3D11ShaderResourceView> srv{};
+
+        const D3D11_TEXTURE2D_DESC textureDesc = {
+            .Width = width,
+            .Height = height,
+            .MipLevels = 1u,
+            .ArraySize = 1u,
+            .Format = format,
+            .SampleDesc = {1u, 0u},
+            .Usage = D3D11_USAGE_IMMUTABLE,
+            .BindFlags = D3D11_BIND_SHADER_RESOURCE,
+            .CPUAccessFlags = 0u,
+        };
+
+        // SysMemPitch is hardcoded to fit for SSAO noise texture, should probably be modified soon.
+        const D3D11_SUBRESOURCE_DATA subresourceData = {
+            .pSysMem = data.data(),
+            .SysMemPitch = width * sizeof(T),
+
+        };
+
+        throwIfFailed(m_device->CreateTexture2D(&textureDesc, &subresourceData, &texture));
+
+        const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+            .Format = format,
+            .ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+            .Texture2D =
+                {
+                    .MostDetailedMip = 0u,
+                    .MipLevels = 1u,
+                },
+        };
+
+        throwIfFailed(m_device->CreateShaderResourceView(texture.Get(), &srvDesc, &srv));
+
+        return srv;
     }
 
     template <typename T> inline wrl::ComPtr<ID3D11Buffer> Application::createBuffer(const BufferCreationDesc& bufferCreationDesc, std::span<const T> data)

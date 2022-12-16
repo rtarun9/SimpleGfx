@@ -34,6 +34,7 @@ VSOutput VsMain(uint vertexID : SV_VertexID)
 Texture2D<float4> albedoTexture : register(t0);
 Texture2D<float4> positionTexture : register(t1);
 Texture2D<float4> normalTexture : register(t2);
+Texture2D<float> ssaoTexture : register(t3);
 
 SamplerState wrapSampler : register(s0);
 
@@ -49,8 +50,10 @@ float4 PsMain(VSOutput input) : SV_Target
     float3 viewSpacePixelPosition = positionTexture.Sample(wrapSampler, input.textureCoord).xyz;
 
     // Ambient lighting.
-    const float ambientStrength = 0.05f;
-    const float3 ambientColor = albedoColor.xyz * ambientStrength;
+    float ambientFactor = ssaoTexture.Sample(wrapSampler, input.textureCoord).x;
+
+
+    const float3 ambientColor = albedoColor.xyz * ambientFactor;
 
     float3 result = ambientColor;
 
