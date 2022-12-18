@@ -197,6 +197,7 @@ namespace sgfx
             .Flags = 0u,
         };
 
+       
         throwIfFailed(m_factory->CreateSwapChainForHwnd(m_device.Get(), m_windowHandle, &swapChainDesc, nullptr, nullptr, &m_swapchain));
 
         // Setup the swapchain backbuffer render target view.

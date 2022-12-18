@@ -105,9 +105,10 @@ namespace sgfx
     {
         math::XMMATRIX projectionMatrix{};
         math::XMFLOAT4  sampleVectors[64];
-        float radius{0.55f};
+        float radius{0.65f};
         float bias{0.025f};
 
-        math::XMFLOAT2 padding{};
+        float power{1.0f};
+        float padding{};
     };
 }

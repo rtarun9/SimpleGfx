@@ -67,7 +67,7 @@ namespace sgfx
         const DirectX::XMVECTOR worldUp = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
         const DirectX::XMVECTOR worldRight = DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
         const DirectX::XMVECTOR worldFront = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-
+        
         DirectX::XMVECTOR cameraRight = DirectX::XMVector3Normalize(DirectX::XMVector3TransformCoord(worldRight, rotationMatrix));
         DirectX::XMVECTOR cameraFront = DirectX::XMVector3Normalize(DirectX::XMVector3TransformCoord(worldFront, rotationMatrix));
         DirectX::XMVECTOR cameraUp = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(cameraFront, cameraRight));

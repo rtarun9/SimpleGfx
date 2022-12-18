@@ -51,11 +51,14 @@ float4 PsMain(VSOutput input) : SV_Target
 
     // Ambient lighting.
     float ambientFactor = ssaoTexture.Sample(wrapSampler, input.textureCoord).x;
-
-
-    const float3 ambientColor = albedoColor.xyz * ambientFactor;
+        
+    const float3 ambientColor = albedoColor.xyz * ambientFactor * 0.4f;
 
     float3 result = ambientColor;
+
+    if (input.textureCoord.x < input.textureCoord.y)
+    return float4(ambientFactor, ambientFactor, ambientFactor, 1.0f);
+
 
     [unroll(5)]
     for (int i = 0; i < 5; ++i)

@@ -15,13 +15,13 @@ void Engine::loadContent()
         .addressMode = D3D11_TEXTURE_ADDRESS_CLAMP,
     });
 
-     m_wrapSampler = createSampler(sgfx::SamplerCreationDesc{
-        .filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
+    m_wrapSampler = createSampler(sgfx::SamplerCreationDesc{
+        .filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
         .addressMode = D3D11_TEXTURE_ADDRESS_WRAP,
     });
 
-    m_ssaoRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32_FLOAT);
-    m_ssaoBlurredRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32_FLOAT);
+    m_ssaoRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R8_UNORM);
+    m_ssaoBlurredRt = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R8_UNORM);
 
     m_renderables["cube"] = createModel("assets/models/Cube/glTF/Cube.gltf");
 
@@ -50,7 +50,7 @@ void Engine::loadContent()
 
     });
 
-     m_boxBlurPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
+    m_boxBlurPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/BoxBlur.hlsl",
         .pixelShaderPath = L"shaders/BoxBlur.hlsl",
         .primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
@@ -95,8 +95,8 @@ void Engine::loadContent()
     m_gpassDepthTexture = createDepthTexture();
 
     m_gpassRts[0] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
-    m_gpassRts[1] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
-    m_gpassRts[2] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    m_gpassRts[1] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
+    m_gpassRts[2] = createRenderTarget(m_windowWidth, m_windowHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
     m_gpassPipeline = createGraphicsPipeline(sgfx::GraphicsPipelineCreationDesc{
         .vertexShaderPath = L"shaders/GPass.hlsl",
@@ -117,7 +117,7 @@ void Engine::loadContent()
 
     // Setup data from SSAO pass.
     m_ssaoBuffer = createConstantBuffer<sgfx::SSAOBuffer>();
-    
+
     std::uniform_real_distribution<float> randomUnitFloatDistribution{0.0f, 1.0f};
     std::default_random_engine generator{};
 
@@ -136,7 +136,7 @@ void Engine::loadContent()
         // Scaling the sample point so the points lie within the hemisphere.
         const math::XMVECTOR randomlyDistributedSamplePoint = randomUnitFloatDistribution(generator) * normalizedRandomVector;
 
-        // We want more sample points generated near the origin and fewer points as the distance from origin increases. 
+        // We want more sample points generated near the origin and fewer points as the distance from origin increases.
         // This is done because we want to give more weight / priority to occlusions happening close to the actual fragment.
 
         const float scaleFactor = static_cast<float>(i) / 64.0f;
@@ -147,13 +147,14 @@ void Engine::loadContent()
 
     // Generate the noise kernel.
     // Contents are used to randomly rotate the kernel vectors.
-    std::array<math::XMFLOAT2, 16> noiseTextureData{};
-    for (const uint32_t i : std::views::iota(0u, 16u))
+    // Z component not taken into account as it will always be 0 (i.e we want rotation around the z axis).
+    std::array<math::XMFLOAT2, 64> noiseTextureData{};
+    for (const uint32_t i : std::views::iota(0u, 64u))
     {
         noiseTextureData[i] = math::XMFLOAT2{randomUnitFloatDistribution(generator) * 2.0f - 1.0f, randomUnitFloatDistribution(generator) * 2.0f - 1.0f};
     }
 
-    m_ssaoRandomRotationTexture = createTexture<math::XMFLOAT2>(noiseTextureData, 4u, 4u, DXGI_FORMAT_R32G32_FLOAT);
+    m_ssaoRandomRotationTexture = createTexture<math::XMFLOAT2>(noiseTextureData, 8u, 8u, DXGI_FORMAT_R32G32_FLOAT);
 }
 
 void Engine::update(const float deltaTime)
@@ -161,7 +162,7 @@ void Engine::update(const float deltaTime)
     m_camera.update(deltaTime);
 
     const math::XMMATRIX viewMatrix = m_camera.getLookAtMatrix();
-    const math::XMMATRIX projectionMatrix = math::XMMatrixPerspectiveFovLH(math::XMConvertToRadians(45.0f), m_windowWidth / static_cast<float>(m_windowHeight), 0.1f, 1000.0f);
+    const math::XMMATRIX projectionMatrix = math::XMMatrixPerspectiveFovLH(math::XMConvertToRadians(45.0f), m_windowWidth / static_cast<float>(m_windowHeight), 0.1f, 230.0f);
 
     m_sceneBuffer.data.viewMatrix = viewMatrix;
     m_sceneBuffer.data.viewProjectionMatrix = viewMatrix * projectionMatrix;
@@ -196,6 +197,7 @@ void Engine::update(const float deltaTime)
     {
         renderable.updateTransformBuffer(viewMatrix, m_deviceContext.Get());
     }
+
 }
 
 void Engine::render()
@@ -211,6 +213,7 @@ void Engine::render()
 
     ImGui::SliderFloat("ssao radius", &m_ssaoBuffer.data.radius, 0.0f, 10.0f);
     ImGui::SliderFloat("ssao bias", &m_ssaoBuffer.data.bias, 0.0f, 10.0f);
+    ImGui::SliderFloat("ssao power", &m_ssaoBuffer.data.power, 0.0f, 10.0f);
 
     for (auto& [name, renderable] : m_renderables)
     {
@@ -275,8 +278,8 @@ void Engine::render()
     ctx->ClearRenderTargetView(m_renderTargetView.Get(), clearColor.data());
     ctx->ClearRenderTargetView(m_ssaoRt.rtv.Get(), clearColor.data());
 
-        std::array<ID3D11ShaderResourceView*, 4> nullSrvs{nullptr, nullptr, nullptr, nullptr};
-    
+    std::array<ID3D11ShaderResourceView*, 4> nullSrvs{nullptr, nullptr, nullptr, nullptr};
+
     for (auto& renderTarget : m_gpassRts)
     {
         ctx->ClearRenderTargetView(renderTarget.rtv.Get(), clearColor.data());
@@ -306,12 +309,9 @@ void Engine::render()
     ctx->PSSetSamplers(0u, 1u, m_offscreenSampler.GetAddressOf());
     ctx->PSSetSamplers(1u, 1u, m_wrapSampler.GetAddressOf());
 
-    const std::array<ID3D11ShaderResourceView* const, 4u> ssaoShaderTextures{m_ssaoRandomRotationTexture.Get(),
-                                                                             m_gpassRts[1].srv.Get(),
-                                                                             m_gpassRts[2].srv.Get(),
-                                                                             m_gpassDepthTexture.srv.Get()};
+    const std::array<ID3D11ShaderResourceView* const, 3u> ssaoShaderTextures{m_ssaoRandomRotationTexture.Get(), m_gpassRts[1].srv.Get(), m_gpassRts[2].srv.Get()};
 
-    ctx->PSSetShaderResources(0u, 4u, ssaoShaderTextures.data());
+    ctx->PSSetShaderResources(0u, 3u, ssaoShaderTextures.data());
 
     ctx->Draw(3u, 0u);
 
@@ -358,7 +358,6 @@ void Engine::render()
     ctx->PSSetSamplers(0u, 1u, m_offscreenSampler.GetAddressOf());
 
     ctx->Draw(3u, 0u);
-
 
     ctx->PSSetShaderResources(0u, 4u, nullSrvs.data());
 

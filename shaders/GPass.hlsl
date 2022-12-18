@@ -14,13 +14,6 @@ struct VSOutput
     float3x3 tbnMatrix : TBN_MATRIX;
 };
 
-struct PSOutput
-{
-    float4 albedo : SV_Target0;
-    float4 position : SV_Target1;
-    float4 normal : SV_Target2;
-};
-
 cbuffer sceneBuffer : register(b0)
 {
     row_major matrix viewMatrix;
@@ -73,6 +66,13 @@ SamplerState albedoTextureSampler : register(s0);
 
 Texture2D<float4> normalTexture : register(t1);
 SamplerState normalTextureSampler : register(s1);
+
+struct PSOutput
+{
+    float4 albedo : SV_Target0;
+    float4 position : SV_Target1;
+    float4 normal : SV_Target2;
+};
 
 PSOutput PsMain(VSOutput input) 
 {

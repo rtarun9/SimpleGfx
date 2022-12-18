@@ -31,14 +31,14 @@ float PsMain(VSOutput input) : SV_Target
     const float pixelSize = float2(1.0f / width, 1.0f / height);
     float sum = 0.0f;
 
-    for (int x = -2; x <= 2; ++x)
+    for (int x = -1; x <= 1; ++x)
     {
-        for (int y = -2; y <= 2; ++y)
+        for (int y = -1; y <= 1; ++y)
         {
             const float2 offset = float2(float(x), float(y)) * pixelSize;
-            sum += tex.Sample(clampSampler, input.textureCoord).x;
+            sum += tex.Sample(clampSampler, input.textureCoord + offset).x;
         }
     }
 
-    return sum / (25.0f);
+    return sum / (9.0f);
 }
